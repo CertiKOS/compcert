@@ -27,6 +27,8 @@ Require LTL.
 Require Linear.
 Require Mach.
 Require Asm.
+Require Rust.
+(* Require Rust. *)
 (** Translation passes. *)
 Require Initializers.
 Require SimplExpr.
@@ -154,6 +156,14 @@ Definition transf_cminor_program (p: Cminor.program) : res Asm.program :=
   @@@ transf_rtl_program.
 
 Definition transf_clight_program (p: Clight.program) : res Asm.program :=
+  OK p
+   @@ print print_Clight
+  @@@ time "Simplification of locals" SimplLocals.transf_program
+  @@@ time "C#minor generation" Cshmgen.transl_program
+  @@@ time "Cminor generation" Cminorgen.transl_program
+  @@@ transf_cminor_program.
+
+Definition transf_clight_program_to_rust (p: Clight.program) : res Asm.program :=
   OK p
    @@ print print_Clight
   @@@ time "Simplification of locals" SimplLocals.transf_program

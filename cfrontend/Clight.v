@@ -28,9 +28,10 @@ Require Import AST.
 Require Import Memory.
 Require Import Events.
 Require Import Globalenvs.
-Require Import Smallstep.
 Require Import Ctypes.
 Require Import Cop.
+Require Import Smallstep.
+Locate Genv.t.
 
 (** * Abstract syntax *)
 
@@ -45,6 +46,9 @@ Require Import Cop.
 
   As in Compcert C, all expressions are annotated with their types,
   as needed to resolve operator overloading and type-dependent behaviors. *)
+
+Search int.
+Locate int.
 
 Inductive expr : Type :=
   | Econst_int: int -> type -> expr       (**r integer literal *)
@@ -173,12 +177,14 @@ Definition type_of_fundef (f: fundef) : type :=
 
 Definition program := Ctypes.program function.
 
+Print program.
+
 (** * Operational semantics *)
 
 (** The semantics uses two environments.  The global environment
   maps names of functions and global variables to memory block references,
   and function pointers to their definitions.  (See module [Globalenvs].)
-  It also contains a composite environment, used by type-dependent operations. *)
+  (* It also contains a composite environment, used by type-dependent operations. *) *)
 
 Record genv := { genv_genv :> Genv.t fundef type; genv_cenv :> composite_env }.
 
@@ -250,6 +256,8 @@ Inductive assign_loc (ce: composite_env) (ty: type) (m: mem) (b: block) (ofs: pt
 Section SEMANTICS.
 
 Variable ge: genv.
+
+
 
 (** Allocation of function-local variables.
   [alloc_variables e1 m1 vars e2 m2] allocates one memory block
@@ -345,7 +353,6 @@ Definition select_switch (n: Z) (sl: labeled_statements): labeled_statements :=
   | None => select_switch_default sl
   end.
 
-(** Turn a labeled statement into a sequence *)
 
 Fixpoint seq_of_labeled_statement (sl: labeled_statements) : statement :=
   match sl with

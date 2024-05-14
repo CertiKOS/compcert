@@ -19,6 +19,7 @@
 Require Import Axioms Coqlib Maps Errors.
 Require Import AST Linking.
 Require Archi.
+Locate PTree.t.
 
 Set Asymmetric Patterns.
 
@@ -1507,6 +1508,8 @@ Inductive fundef : Type :=
   | Internal: F -> fundef
   | External: external_function -> typelist -> type -> calling_convention -> fundef.
 
+Print fundef.
+
 (** A program, or compilation unit, is composed of:
 - a list of definitions of functions and global variables;
 - the names of functions and global variables that are public (not static);
@@ -1528,8 +1531,12 @@ Definition program_of_program (p: program) : AST.program fundef type :=
   {| AST.prog_defs := p.(prog_defs);
      AST.prog_public := p.(prog_public);
      AST.prog_main := p.(prog_main) |}.
+Print program.
 
 Coercion program_of_program: program >-> AST.program.
+Print program_of_program.
+Print fundef.
+
 
 Program Definition make_program (types: list composite_definition)
                                 (defs: list (ident * globdef fundef type))
