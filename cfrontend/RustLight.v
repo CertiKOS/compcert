@@ -158,6 +158,7 @@ Print ident.
 
 Record r_function : Type := mkrfunction {
   fn_return: type;
+
   fn_callconv: r_calling_convention;
   (* args to function *)
   fn_params: list (ident * type);
@@ -241,7 +242,18 @@ Print r_program.
 
 Definition transl_globvar (id: ident) (ty: type) := OK ty.
 
-Definition transl_internal_fun (ce: composite_env) (f: Clight.function) : res r_function := OK(empty_r_fn).
+Definition transl_internal_fun (ce: composite_env) (f: Clight.function) : res r_function :=
+  let return_type := (Clight.fn_return f) in
+  OK({|
+        fn_return := return_type;
+        fn_callconv := {| cc_structret := (AST.cc_structret (Clight.fn_callconv f)) |};
+        fn_params := f.(Clight.fn_params);
+        (* TODO *)
+        fn_vars := nil;
+        fn_temps := nil;
+        fn_body := S_skip;
+
+      |}).
 
 
 Definition transl_fundef (ce: composite_env) (id: ident) (fn : Clight.fundef) : res r_fundef :=
