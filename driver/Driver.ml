@@ -39,6 +39,9 @@ let object_filename sourcename =
 (* From CompCert C AST to asm *)
 
 let compile_c_file sourcename ifile ofile =
+
+  (*  *set the destinations (e.g. pointers) if we want to print *)
+
   (* Prepare to dump Clight, RTL, etc, if requested *)
   let set_dest dst opt ext =
     dst := if !opt then Some (output_filename sourcename ~suffix:ext)
@@ -46,15 +49,35 @@ let compile_c_file sourcename ifile ofile =
   set_dest Cprint.destination option_dparse ".parsed.c";
   set_dest PrintCsyntax.destination option_dcmedium ".compcert.c";
   set_dest PrintClight.destination option_dclight ".light.c";
+  set_dest PrintRustLight.destination option_drustlight ".rs";
   set_dest PrintCminor.destination option_dcminor ".cm";
   set_dest PrintRTL.destination option_drtl ".rtl";
   set_dest Regalloc.destination_alloctrace option_dalloctrace ".alloctrace";
   set_dest PrintLTL.destination option_dltl ".ltl";
   set_dest PrintMach.destination option_dmach ".mach";
+  (*  TODO add in pass for drust*)
   set_dest AsmToJSON.destination option_sdump !sdump_suffix;
   (* Parse the ast *)
   let csyntax = parse_c_file sourcename ifile in
+  (* IF drust flag is set *)
+  (* (1) call out to transf_rust_program *)
+  (* (2)  *)
+  (* (3)  *)
+  (* (4)  *)
+
+  (*let maybe_rust = Compiler.transf_clight_program_to_rust csyntax in
+  match maybe_rust with
+  | Errors.OK rustsyntax -> ()
+  | Errors.Error msg -> ()
+    ;*)
+
+
   (* Convert to Asm *)
+  (* this calls out to compiler.v::transf_c_program*)
+  (* which calls transf_clight_program *)
+  (* which calls print_clight *)
+  (* which is bound to PrintClight.print_if *)
+  (* which knows which file to print to because we just set the destination *)
   let asm =
     match Compiler.apply_partial
                (Compiler.transf_c_program csyntax)
@@ -221,6 +244,7 @@ Code generation options: (use -fno-<opt> to turn off -f<opt>)
   -drtl          Save RTL at various optimization points in <file>.rtl.<n>
   -dltl          Save LTL after register allocation in <file>.ltl
   -dmach         Save generated Mach code in <file>.mach
+  -drustlight    Save generated Rust code in <file>.rs
   -dasm          Save generated assembly in <file>.s
   -dall          Save all generated intermediate files in <file>.<ext>
   -sdump         Save info for post-linking validation in <file>.json
@@ -332,6 +356,7 @@ let cmdline_actions =
   Exact "-dltl", Set option_dltl;
   Exact "-dalloctrace", Set option_dalloctrace;
   Exact "-dmach", Set option_dmach;
+  Exact "-drustlight", Set option_drustlight;
   Exact "-dasm", Set option_dasm;
   Exact "-dall", Self (fun _ ->
     option_dprepro := true;
@@ -406,6 +431,7 @@ let _ =
            };
     Printexc.record_backtrace true;
     Frontend.init ();
+    printf "%s" "starting spot that is actually called\n";
     parse_cmdline cmdline_actions;
     DebugInit.init (); (* Initialize the debug functions *)
     if nolink () && !option_o <> None && !num_source_files >= 2 then

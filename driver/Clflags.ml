@@ -42,13 +42,13 @@ let option_dprepro = ref false
 let option_dparse = ref false
 let option_dcmedium = ref false
 let option_dclight = ref false
+let option_drustlight = ref false
 let option_dcminor = ref false
 let option_drtl = ref false
 let option_dltl = ref false
 let option_dalloctrace = ref false
 let option_dmach = ref false
 let option_dasm = ref false
-let option_drust = ref false
 let option_sdump = ref false
 let option_g = ref false
 let option_gdwarf = ref (if Configuration.system = "diab" then 2 else 3)

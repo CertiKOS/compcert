@@ -57,7 +57,7 @@
                  coqPackages_8_12.coq.ocamlPackages.merlin
                  # coqPackages_8_12.coq.ocamlPackages.utop
                  coqPackages_8_12.coq.ocamlPackages.ocp-indent
-                 ocamlPackages.ocaml-lsp
+                 ocaml-ng.ocamlPackages_4_10.ocaml-lsp
                  # coqPackages_8_12.coq.ocamlPackages.ocamlformat
 
                  # ocamlPackages_4_12.menhir
@@ -67,7 +67,6 @@
                  pkg-config
                  just
                  typst
-                 typst-lsp
                  cvc4
                ];
           };

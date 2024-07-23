@@ -32,6 +32,7 @@ Require Ctypes.
 Require Csyntax.
 Require Ctyping.
 Require Clight.
+Require RustLight.
 Require Compiler.
 Require Parser.
 Require Initializers.
@@ -118,6 +119,7 @@ Extract Constant Compopts.debug =>
 
 (* Compiler *)
 Extract Constant Compiler.print_Clight => "PrintClight.print_if".
+Extract Constant Compiler.print_Rustlight => "PrintRustLight.print_if".
 Extract Constant Compiler.print_Cminor => "PrintCminor.print_if".
 Extract Constant Compiler.print_RTL => "PrintRTL.print_if".
 Extract Constant Compiler.print_LTL => "PrintLTL.print_if".
@@ -175,4 +177,5 @@ Separate Extraction
    AST.signature_main
    Floats.Float32.from_parsed Floats.Float.from_parsed
    Globalenvs.Senv.invert_symbol
-   Parser.translation_unit_file.
+   Parser.translation_unit_file
+   RustLight.rexpr RustLight.r_program.

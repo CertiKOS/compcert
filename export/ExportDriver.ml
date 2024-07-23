@@ -40,7 +40,7 @@ let export_csyntax sourcename csyntax ofile =
 
 (* Transform the CompCert Csyntax AST into Clight and export it *)
 
-let export_clight sourcename csyntax ofile =
+let export_clight sourcename csyntax ofile dump_rustlight =
   let loc = file_loc sourcename in
   let clight =
     match SimplExpr.transl_program csyntax with
@@ -57,6 +57,14 @@ let export_clight sourcename csyntax ofile =
       fatal_error loc "%a" print_error msg in
   (* Dump Clight in C syntax if requested *)
   PrintClight.print_if_2 clight;
+
+  printf "%s" "Camels\n";
+
+  let rustlight = RustLight.transl_program clight in
+
+  (**this is where we want to print to rust*)
+  PrintRustLight.print_if rustlight;
+
   (* Print Clight in Coq syntax *)
   let oc = open_out ofile in
   ExportClight.print_program (Format.formatter_of_out_channel oc)
@@ -72,10 +80,11 @@ let compile_c_file sourcename ifile ofile =
   set_dest Cprint.destination option_dparse ".parsed.c";
   set_dest PrintCsyntax.destination option_dcmedium ".compcert.c";
   set_dest PrintClight.destination option_dclight ".light.c";
+  set_dest PrintRustLight.destination option_drustlight ".rs";
   let cs = parse_c_file sourcename ifile in
   match !option_mode with
   | Mode_Csyntax -> export_csyntax sourcename cs ofile
-  | Mode_Clight  -> export_clight sourcename cs ofile
+  | Mode_Clight  -> export_clight sourcename cs ofile option_drustlight
 
 let output_filename sourcename  =
   let prefixname = Filename.remove_extension sourcename in
@@ -175,6 +184,7 @@ let cmdline_actions =
    Exact "-dparse", Set option_dparse;
    Exact "-dc", Set option_dcmedium;
    Exact "-dclight", Set option_dclight;
+   Exact "-drustlight", Set option_drustlight;
    Exact "-dall", Self (fun _ ->
        option_dprepro := true;
        option_dparse := true;
