@@ -16,6 +16,12 @@ open Clight*)
   (* | Unbounded -> fprintf p "@[<v 0> It works hello world @]@wtwasdfjaksdfkjsdkjasdjfkasdfajsdkfaa\n\n\n\n\n\n\n" *)
   (* | Bounded (_, _) -> fprintf p "It extra works hello world\n" *)
 
+let temp_name (id: AST.ident) =
+  try
+    "$" ^ Hashtbl.find string_of_atom id
+  with Not_found ->
+    Printf.sprintf "$%d" (P.to_int id)
+
 let destination : string option ref = ref None
 
 let define_composite p (Composite(id, su, m, a)) = ()
@@ -43,6 +49,8 @@ let rec gen_ty_rust ty =
     let fmted_ity = gen_ty_rust ity in
     sprintf "[ %s; %ld]"  fmted_ity (camlint_of_coqint num_ele)
   | _ -> "unimplemented!"
+
+(* TODO control-flow precedence *)
 
 let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust ty)
 
@@ -91,6 +99,96 @@ let print_globvar fmt id v =
     end;
   fprintf fmt ";@]@ @ "
 
+let rec print_expr fmt e =
+  match e with
+  | Econst_int(n, Ctypes.Tint(I32, Unsigned, _)) ->
+    fprintf fmt "%luU" (camlint_of_coqint n)
+  | Econst_int(n, _) ->
+    fprintf fmt "%ld" (camlint_of_coqint n)
+  | Econst_float(f, _) ->
+    fprintf fmt "%.18g" (camlfloat_of_coqfloat f)
+  | Econst_single(f, _) ->
+    fprintf fmt "%.18gf" (camlfloat_of_coqfloat32 f)
+  | Econst_long(n, Ctypes.Tlong(Unsigned, _)) ->
+    fprintf fmt "%LuLLU" (camlint64_of_coqint n)
+  | Econst_long(n, _) ->
+    fprintf fmt "%LdLL" (camlint64_of_coqint n)
+  | RustLight.Empty -> fprintf fmt "/* TODO remove. Placeholder */"
+  | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id)
+  | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
+  | RustLight.Eunop (op_ty, exp, _ty) ->
+    (
+      let op_name =
+      begin match op_ty with
+      | Cop.Onotbool -> "!"
+      | Cop.Onotint -> "!"
+      | Cop.Oneg -> "-"
+      | Cop.Oabsfloat -> "UNSUPPORTED OP"
+      end
+      in
+      fprintf fmt "%s%a" op_name print_expr exp;
+    )
+  | RustLight.Ebinop (op_type, e1, e2, ty) ->
+    (
+      let op_name =
+        begin match op_type with
+        | Cop.Oadd -> "+"
+        | Cop.Osub -> "-"
+        | Cop.Omul -> "*"
+        | Cop.Odiv -> "/"
+        | Cop.Omod -> "%"
+        | Cop.Oand -> "&"
+        | Cop.Oor  -> "|"
+        | Cop.Oxor -> "^"
+        | Cop.Oshl -> "<<"
+        | Cop.Oshr -> ">>"
+        | Cop.Oeq  -> "=="
+        | Cop.One  -> "!="
+        | Cop.Olt  -> "<"
+        | Cop.Ogt  -> ">"
+        | Cop.Ole  -> "<="
+        | Cop.Oge  -> ">="
+        end
+      in
+      fprintf fmt "(%a %s %a)" print_expr e1 op_name print_expr e2
+    )
+  | RustLight.Ederef (_, _) -> fprintf fmt "unimplemented ederef"
+  | RustLight.Eaddrof (_, _) -> fprintf fmt "unimplemented addrof"
+  | RustLight.Ecast (_, _) -> fprintf fmt "unimplemented ecast"
+  | RustLight.Efield (_, _, _) -> fprintf fmt "unimplemented efield"
+  | RustLight.Esizeof (_, _) -> fprintf fmt "unimplemented esizeof"
+  | RustLight.Ealignof (_, _) -> fprintf fmt "unimplemented ealignof"
+
+let rec print_stmt fmt body =
+  match body with
+  | S_skip -> fprintf fmt "/* skip stmt */";
+  | S_assign(e1, e2) -> fprintf fmt "@[<hv 2>%a =@ %a;@]" print_expr e1 print_expr e2;
+  | S_set(id, e) -> fprintf fmt "@[<hv 2>%s =@ %a;@]" (temp_name id) print_expr e;
+  | S_return(Some exp) -> fprintf fmt "return %a;@ " print_expr exp
+  | S_return(None) -> fprintf fmt "return;@ "
+  | S_sequence(RustLight.S_skip, s2) ->
+    print_stmt fmt s2
+  | S_sequence(s1, RustLight.S_skip) ->
+    print_stmt fmt s1
+  | S_sequence(e1, e2) -> fprintf fmt "%a@ %a" print_stmt e1 print_stmt e2
+  | S_continue -> fprintf fmt "continue;"
+  | S_if_then_else(exp, s_true, S_skip)  -> (
+      fprintf fmt "if %a { @ %a; @ }" print_expr exp print_stmt s_true
+    )
+  | S_if_then_else(exp, S_skip, s_false)  -> (
+      fprintf fmt "if !(%a) { @ %a; @ }" print_expr exp print_stmt s_false
+    )
+  | S_if_then_else(exp, s_true, s_false)  -> (
+      fprintf fmt "if %a { %a; } else { %a; }"
+        print_expr exp print_stmt s_true print_stmt s_false
+    )
+  | S_call(maybe_ident, exp, lexp) -> fprintf fmt "unimplemented call stmt"
+  | S_break(r_val) -> fprintf fmt "Unimplemented break"
+  | S_builtin(maybe_ident, external_fn, lty,  lexp) -> fprintf fmt "unimplemented call stmt"
+
+  | _ -> fprintf fmt "unimplemented?!"
+
+
 (* fn name(param: ty, ) -> { body  }*)
 let print_function fmt id fn =
   let fn_name = (extern_atom id) in
@@ -98,11 +196,18 @@ let print_function fmt id fn =
   let fn_args = List.fold_left (fun acc (tid, tty) -> acc ^ (gen_name_and_ty_rust (extern_atom tid) tty) ^ ", ") ("") fn_params in
   (* let params = name_function_parameters extern_atom (extern_atom id) f.fn_params f.fn_callconv in *)
   (* TODO deal with visibility modifier *)
-  fprintf fmt "fn %s(%s)" fn_name fn_args
-  (* print name of function *)
+  fprintf fmt "#[no_mangle]@ unsafe extern \"C\" fn %s(%s) -> %s" fn_name fn_args (gen_ty_rust fn.fn_return);
+  fprintf fmt "@[<v 2>{@ ";
+  (* TODO find an example that uses this *)
+  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (extern_atom vid) vty) ) fn.fn_vars;
 
+  (* TODO find an example that uses this *)
+  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (temp_name vid) vty) ) fn.fn_temps;
 
+  print_stmt fmt fn.fn_body;
 
+  (* print statements + vars *)
+  fprintf fmt "@;<0 -2>}@]@ @ "
 
 let print_fundef fmt id fundef =
   match fundef with

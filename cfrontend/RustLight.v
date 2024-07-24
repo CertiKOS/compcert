@@ -74,6 +74,7 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : res (rexp
   | Clight.Ebinop op exp1 exp2 ty =>
       do rexp1 <- transl_expr ce exp1;
       do rexp2 <- transl_expr ce exp2;
+      (* TODO think about casting to different widths *)
       OK(Ebinop op rexp1 rexp2 ty)
   | Clight.Ecast exp ty =>
       do rexp <- transl_expr ce exp;
@@ -87,6 +88,7 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : res (rexp
       OK(Ealignof ty' ty)
   end.
 
+(* TODO rename to be consistent *)
 Inductive rstatement: Type :=
   | S_skip : rstatement
   (* no let. That is a = b; *)
@@ -244,15 +246,14 @@ Definition transl_globvar (id: ident) (ty: type) := OK ty.
 
 Definition transl_internal_fun (ce: composite_env) (f: Clight.function) : res r_function :=
   let return_type := (Clight.fn_return f) in
+  do body <- transl_statement ce return_type 1%nat 0%nat (Clight.fn_body f);
   OK({|
         fn_return := return_type;
         fn_callconv := {| cc_structret := (AST.cc_structret (Clight.fn_callconv f)) |};
         fn_params := f.(Clight.fn_params);
-        (* TODO *)
-        fn_vars := nil;
-        fn_temps := nil;
-        fn_body := S_skip;
-
+        fn_vars := f.(Clight.fn_vars);
+        fn_temps := f.(Clight.fn_temps);
+        fn_body := body;
       |}).
 
 
