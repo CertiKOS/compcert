@@ -18,9 +18,9 @@ open Clight*)
 
 let temp_name (id: AST.ident) =
   try
-    "$" ^ Hashtbl.find string_of_atom id
+    "tmp_id_" ^ Hashtbl.find string_of_atom id
   with Not_found ->
-    Printf.sprintf "$%d" (P.to_int id)
+    Printf.sprintf "tmp_id_%d" (P.to_int id)
 
 let destination : string option ref = ref None
 
@@ -95,7 +95,7 @@ let print_globvar fmt id v =
     begin match v.gvar_info, v.gvar_init with
       | (Ctypes.Tint _ | Ctypes.Tlong _ | Ctypes.Tfloat _ | Tpointer _ | Tfunction _),
         [i1] -> print_primitive_init fmt i1
-      | _, il -> ()
+      | _, il -> () (* TODO this for string support  *)
     end;
   fprintf fmt ";@]@ @ "
 
@@ -103,6 +103,14 @@ let rec print_expr fmt e =
   match e with
   | Econst_int(n, Ctypes.Tint(I32, Unsigned, _)) ->
     fprintf fmt "%luU" (camlint_of_coqint n)
+  | Econst_int(n, Ctypes.Tint(IBool, _, _)) ->
+    fprintf fmt "%s"
+    begin match (camlint_of_coqint n) with
+    | 0l -> "false"
+    | 1l -> "true"
+    | _ -> "ERROR bool is outside {0, 1}"
+    end
+  (* TODO fix type issue*)
   | Econst_int(n, _) ->
     fprintf fmt "%ld" (camlint_of_coqint n)
   | Econst_float(f, _) ->
@@ -162,8 +170,8 @@ let rec print_expr fmt e =
 let rec print_stmt fmt body =
   match body with
   | S_skip -> fprintf fmt "/* skip stmt */";
-  | S_assign(e1, e2) -> fprintf fmt "@[<hv 2>%a =@ %a;@]" print_expr e1 print_expr e2;
-  | S_set(id, e) -> fprintf fmt "@[<hv 2>%s =@ %a;@]" (temp_name id) print_expr e;
+  | S_assign(e1, e2) -> fprintf fmt "@[<hv 2> %a =@ %a;@]@ " print_expr e1 print_expr e2;
+  | S_set(id, e) -> fprintf fmt "@[<hv 2>%s =@ %a;@]@ " (temp_name id) print_expr e;
   | S_return(Some exp) -> fprintf fmt "return %a;@ " print_expr exp
   | S_return(None) -> fprintf fmt "return;@ "
   | S_sequence(RustLight.S_skip, s2) ->
@@ -183,9 +191,29 @@ let rec print_stmt fmt body =
         print_expr exp print_stmt s_true print_stmt s_false
     )
   | S_call(maybe_ident, exp, lexp) -> fprintf fmt "unimplemented call stmt"
-  | S_break(r_val) -> fprintf fmt "Unimplemented break"
+  | S_break(None) -> fprintf fmt "break; "
+  | S_break(Some(lbl)) -> fprintf fmt "unimplemented?!"
   | S_builtin(maybe_ident, external_fn, lty,  lexp) -> fprintf fmt "unimplemented call stmt"
+  | S_loop(maybe_lbl, stmt, S_skip) -> (
+      fprintf fmt "@[<v 2>loop {@ %a@;<0 -2>}@]"
+              print_stmt stmt
+    )
+  | S_match_int(expr, stmts) -> (
+      fprintf fmt "match %a @ { @ " print_expr expr;
+      let current = ref stmts in
+      while !current <> LSnil do
+        match !current with
+        | LSnil -> fprintf fmt "@[<v 1> _ => () @] @"
+        | LScons (n, body, stmts) ->
+          (
+            fprintf fmt "%s => { @[<v 1>@ %a @; @] @ } @ " (Z.to_string n) print_stmt body;
+            current := stmts; ()
+          )
+      done;
 
+      fprintf fmt "}; @ "
+
+    )
   | _ -> fprintf fmt "unimplemented?!"
 
 
@@ -197,7 +225,7 @@ let print_function fmt id fn =
   (* let params = name_function_parameters extern_atom (extern_atom id) f.fn_params f.fn_callconv in *)
   (* TODO deal with visibility modifier *)
   fprintf fmt "#[no_mangle]@ unsafe extern \"C\" fn %s(%s) -> %s" fn_name fn_args (gen_ty_rust fn.fn_return);
-  fprintf fmt "@[<v 2>{@ ";
+  fprintf fmt "@ @[<v 2>{@ ";
   (* TODO find an example that uses this *)
   List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (extern_atom vid) vty) ) fn.fn_vars;
 
