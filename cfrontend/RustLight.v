@@ -5,22 +5,32 @@ Require Import Axioms Coqlib.
 Require Import Values.
 Require Import Integers.
 Require Import AST.
-(* brings in do notation? *)
+(* brings in do notation on errors *)
 Require Import Errors.
 Require Import Cop.
 Require Import Memory.
 Require Import Globalenvs.
 Require Import Memory.
+Require SimplExpr.
 Require Clight.
 Require Cshmgen.
 Local Open Scope error_monad_scope.
+Declare Scope gensym_monad_scope_2.
+
+Fixpoint m2m {A: Type} (m: res A) : SimplExpr.mon A :=
+  match m with
+  | OK(a) => SimplExpr.ret a
+  | Error(_) => SimplExpr.error nil
+  end.
 
 
-(* potentially region based *)
-(* rustlight will not use lifetimes at this point*)
-Inductive lifetime : Type :=
-  | Unbounded
-  | Bounded: int ->  int -> lifetime.
+Notation "'gdo' X <- A ; B" := (SimplExpr.bind A (fun X => B))
+   (at level 200, X ident, A at level 100, B at level 200).
+
+Notation "'gdom' X <- A ; B" := (SimplExpr.bind (m2m A) (fun X => B))
+   (at level 200, X ident, A at level 100, B at level 200).
+
+
 
 Print composite_env. (* things in scope *)
 Print composite.
@@ -88,6 +98,9 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : res (rexp
       OK(Ealignof ty' ty)
   end.
 
+Print SimplExpr.transl_stmt.
+
+
 (* TODO rename to be consistent *)
 Inductive rstatement: Type :=
   | S_skip : rstatement
@@ -113,39 +126,40 @@ with labeled_rstatements : Type :=
 with loop_lbl : Type := | Loop_lbl: ident -> loop_lbl.
 
 Fixpoint transl_statement (ce: composite_env) (tyret: type) (nbrk ncnt: nat)
-                          (s: Clight.statement) {struct s} : res rstatement :=
+                          (s: Clight.statement) {struct s} : SimplExpr.mon rstatement :=
   match s with
-  | Clight.Sskip => OK(S_skip)
+  | Clight.Sskip => SimplExpr.ret (S_skip)
   | Clight.Sassign lval rval =>
-      do r_lval <- transl_expr ce lval;
-      do r_rval <- transl_expr ce rval;
-      OK(S_assign r_lval r_rval)
+      gdom r_val <-
+          do r_lval <- transl_expr ce lval;
+          do r_rval <- transl_expr ce rval;
+          OK(S_assign r_lval r_rval);
+      SimplExpr.ret r_val
   | Clight.Sifthenelse exp s1 s2 =>
-      do r_exp <- transl_expr ce exp;
-      do r_s1 <- transl_statement ce tyret nbrk ncnt s1;
-      do r_s2 <- transl_statement ce tyret nbrk ncnt s2;
-      OK(S_if_then_else r_exp r_s1 r_s2)
+      gdom r_exp <- transl_expr ce exp;
+      gdo r_s1 <- transl_statement ce tyret nbrk ncnt s1;
+      gdo r_s2 <- transl_statement ce tyret nbrk ncnt s2;
+      SimplExpr.ret (S_if_then_else r_exp r_s1 r_s2)
   | Clight.Sset x exp =>
-      do r_exp <- transl_expr ce exp;
-      OK(S_set x r_exp)
+      gdom r_exp <- transl_expr ce exp;
+      SimplExpr.ret (S_set x r_exp)
   | Clight.Ssequence exp1 exp2 =>
-      do r_exp1 <- transl_statement ce tyret nbrk ncnt exp1;
-      do r_exp2 <- transl_statement ce tyret nbrk ncnt exp2;
-      OK (S_sequence r_exp1 r_exp2)
-  | Clight.Sreturn None => OK(S_return None)
+      gdo r_exp1 <- transl_statement ce tyret nbrk ncnt exp1;
+      gdo r_exp2 <- transl_statement ce tyret nbrk ncnt exp2;
+      SimplExpr.ret (S_sequence r_exp1 r_exp2)
+  | Clight.Sreturn None => SimplExpr.ret (S_return None)
   | Clight.Sreturn (Some exp) =>
-      do r_exp <- transl_expr ce exp;
-      OK(S_return (Some r_exp))
+      gdom r_exp <- transl_expr ce exp;
+      SimplExpr.ret (S_return (Some r_exp))
   | Clight.Sswitch exp stmts =>
-    OK(S_skip)
-
-  | Clight.Scall x b cl => OK(S_skip)
-  | Clight.Sbuiltin x ef tyargs bl => OK(S_skip)
-  | Clight.Sloop s1 s2 => OK(S_skip)
-  | Clight.Sbreak => OK(S_skip)
-  | Clight.Scontinue => OK(S_skip)
-  | Clight.Slabel lbl s => OK(S_skip)
-  | Clight.Sgoto lbl => OK(S_skip)
+    SimplExpr.ret (S_skip)
+  | Clight.Scall x b cl => SimplExpr.ret (S_skip)
+  | Clight.Sbuiltin x ef tyargs bl => SimplExpr.ret (S_skip)
+  | Clight.Sloop s1 s2 => SimplExpr.ret (S_skip)
+  | Clight.Sbreak => SimplExpr.ret (S_skip)
+  | Clight.Scontinue => SimplExpr.ret (S_skip)
+  | Clight.Slabel lbl s => SimplExpr.ret (S_skip)
+  | Clight.Sgoto lbl => SimplExpr.ret (S_skip)
   end.
 
 Record r_calling_convention : Type := mkcallconv { cc_structret: bool }.
@@ -242,19 +256,67 @@ Definition r_fundef := Ctypes.fundef r_function.
 Definition r_program := Ctypes.program r_function.
 Print r_program.
 
+(* TODO make signature explicit *)
 Definition transl_globvar (id: ident) (ty: type) := OK ty.
+
+Search positive.
+
+Local Open Scope positive_scope.
+
+
+Fixpoint get_max_ident_helper (idents: list ident) (max_ident: ident) : ident :=
+  match idents with
+  | nil => max_ident
+  | hd :: tl =>
+      (
+        let new_max_ident := if (max_ident <? hd) then hd else max_ident in
+        get_max_ident_helper tl new_max_ident
+      )
+  end.
+
+
+Definition get_max_ident (idents: list ident) : res ident :=
+  match idents with
+  | nil  => Error nil
+  | hd :: tl => OK(get_max_ident_helper tl hd)
+  end.
+
+
+Print positive.
+
+Print map.
+
+(* NOTE: assumed short atoms are in use, not canonical atoms *)
+Definition reconstruct_generator (trail: list (ident * type)) : SimplExpr.generator :=
+  let idents := map fst trail in
+  let maybe_max_ident := get_max_ident idents in
+  let max_ident :=
+    (
+        match maybe_max_ident with
+        | OK(x) => xI x
+        | _ => SimplExpr.first_unused_ident tt
+        end
+    )
+  in
+  SimplExpr.mkgenerator max_ident trail.
 
 Definition transl_internal_fun (ce: composite_env) (f: Clight.function) : res r_function :=
   let return_type := (Clight.fn_return f) in
-  do body <- transl_statement ce return_type 1%nat 0%nat (Clight.fn_body f);
-  OK({|
-        fn_return := return_type;
-        fn_callconv := {| cc_structret := (AST.cc_structret (Clight.fn_callconv f)) |};
-        fn_params := f.(Clight.fn_params);
-        fn_vars := f.(Clight.fn_vars);
-        fn_temps := f.(Clight.fn_temps);
-        fn_body := body;
-      |}).
+  let generator := reconstruct_generator f.(Clight.fn_temps) in
+  let body := transl_statement ce return_type 1%nat 0%nat (Clight.fn_body f) generator in
+  match body with
+  | SimplExpr.Err msg => Error msg
+  | SimplExpr.Res r_body r_g i =>
+      OK({|
+            fn_return := return_type;
+            fn_callconv := {| cc_structret := (AST.cc_structret (Clight.fn_callconv f)) |};
+            fn_params := f.(Clight.fn_params);
+            fn_vars := f.(Clight.fn_vars);
+            fn_temps := r_g.(SimplExpr.gen_trail);
+            fn_body := r_body;
+          |})
+  end.
+
 
 
 Definition transl_fundef (ce: composite_env) (id: ident) (fn : Clight.fundef) : res r_fundef :=
@@ -280,7 +342,6 @@ Definition transl_program (c_prog: Clight.program) : res (Clight.program * r_pro
       Ctypes.prog_comp_env := c_prog.(prog_comp_env);
       Ctypes.prog_comp_env_eq := c_prog.(prog_comp_env_eq);
     |} in
-  (* do r_prog <- transform_partial_program2 (transl_fundef c_prog.(prog_comp_env)) transl_globvar c_prog; *)
   OK(c_prog, r_prog).
 
 (* Error(msg "not implemented yet"). *)
