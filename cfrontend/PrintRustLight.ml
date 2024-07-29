@@ -121,7 +121,7 @@ let rec print_expr fmt e =
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
     fprintf fmt "%LdLL" (camlint64_of_coqint n)
-  | RustLight.Empty -> fprintf fmt "/* TODO remove. Placeholder */"
+  (* | RustLight.Empty -> fprintf fmt "/* TODO remove. Placeholder */" *)
   | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id)
   | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
   | RustLight.Eunop (op_ty, exp, _ty) ->
@@ -175,12 +175,11 @@ let rec print_stmt fmt body =
   | S_set(id, e) -> fprintf fmt "@[<hv 2>%s =@ %a;@]@ " (temp_name id) print_expr e;
   | S_return(Some exp) -> fprintf fmt "return %a;@ " print_expr exp
   | S_return(None) -> fprintf fmt "return;@ "
-  | S_sequence(RustLight.S_skip, s2) ->
-    print_stmt fmt s2
-  | S_sequence(s1, RustLight.S_skip) ->
-    print_stmt fmt s1
+  | S_sequence(RustLight.S_skip, s2) -> print_stmt fmt s2
+  | S_sequence(s1, RustLight.S_skip) -> print_stmt fmt s1
   | S_sequence(e1, e2) -> fprintf fmt "%a@ %a" print_stmt e1 print_stmt e2
-  | S_continue -> fprintf fmt "continue;"
+  | S_continue(None) -> fprintf fmt "continue;"
+  | S_continue(Some(lbl)) -> fprintf fmt "continue '%ld;" (camlint_of_coqint lbl)
   | S_if_then_else(exp, s_true, S_skip)  -> (
       fprintf fmt "@[<v 2>if %a {@ %a@;<0 -2>}@]" print_expr exp print_stmt s_true
     )
@@ -193,11 +192,15 @@ let rec print_stmt fmt body =
     )
   | S_call(maybe_ident, exp, lexp) -> fprintf fmt "unimplemented call stmt"
   | S_break(None) -> fprintf fmt "break; @,"
-  | S_break(Some(lbl)) -> fprintf fmt "unimplemented?!"
+  | S_break(Some(lbl)) -> fprintf fmt "break '%ld; @," (camlint_of_coqint lbl)
   | S_builtin(maybe_ident, external_fn, lty,  lexp) -> fprintf fmt "unimplemented call stmt"
-  | S_loop(maybe_lbl, stmt, S_skip) -> (
+  | S_loop(None, stmt, S_skip) -> (
       fprintf fmt "@[<v 2>loop {@ %a@;<0 -2>}@]"
               print_stmt stmt
+    )
+  | S_loop(Some(lbl), stmt, S_skip) -> (
+      fprintf fmt "@[<v 2>'%ld: loop {@ %a@;<0 -2>}@]"
+              (camlint_of_coqint lbl) print_stmt stmt
     )
   | S_match_int(expr, stmts) -> (
       fprintf fmt "@[<v 2>match %a {@ %a@;<0 -2>};@]" print_expr expr print_cases stmts;
