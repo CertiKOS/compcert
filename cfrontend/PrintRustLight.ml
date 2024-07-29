@@ -167,6 +167,12 @@ let rec print_expr fmt e =
   | RustLight.Esizeof (_, _) -> fprintf fmt "unimplemented esizeof"
   | RustLight.Ealignof (_, _) -> fprintf fmt "unimplemented ealignof"
 
+let rec print_arglist fmt arglist =
+  match arglist with
+  | arg :: al ->
+    print_expr fmt arg; print_arglist fmt al
+  | nil -> ()
+
 
 let rec print_stmt fmt body =
   match body with
@@ -190,7 +196,6 @@ let rec print_stmt fmt body =
       fprintf fmt "if %a { %a; } else { %a; }"
         print_expr exp print_stmt s_true print_stmt s_false
     )
-  | S_call(maybe_ident, exp, lexp) -> fprintf fmt "unimplemented call stmt"
   | S_break(None) -> fprintf fmt "break; @,"
   | S_break(Some(lbl)) -> fprintf fmt "break 'lbl_%ld; @," (camlint_of_coqint lbl)
   | S_builtin(maybe_ident, external_fn, lty,  lexp) -> fprintf fmt "unimplemented call stmt"
@@ -204,6 +209,17 @@ let rec print_stmt fmt body =
     )
   | S_match_int(expr, stmts) -> (
       fprintf fmt "@[<v 2>match %a {@ %a@;<0 -2>};@]" print_expr expr print_cases stmts;
+    )
+  | S_call(Some(id), name, arg_list) -> (
+      fprintf fmt "@[<hv 2>%s =@ %a@,(@[<hov 0>%a@]);@]"
+        (temp_name id)
+        print_expr name
+        print_arglist arg_list
+    )
+  | S_call(None, name, arg_list) -> (
+      fprintf fmt "@[<hv 2>%a@,(@[<hov 0>%a@]);@]"
+        print_expr name
+        print_arglist arg_list
     )
   | _ -> fprintf fmt "unimplemented?!"
 

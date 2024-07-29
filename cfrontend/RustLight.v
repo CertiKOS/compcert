@@ -15,7 +15,6 @@ Require SimplExpr.
 Require Clight.
 Require Cshmgen.
 Local Open Scope error_monad_scope.
-Declare Scope gensym_monad_scope_2.
 
 (* TODO *)
 (* - precedence *)
@@ -27,7 +26,6 @@ Declare Scope gensym_monad_scope_2.
 (* - builtins *)
 (* - slides comparing generated assembly *)
 (* - refactor transl function to be less gross *)
-(* - refactor transl function to only use one lbl instead of three since you *can* have switch *)
 
 Fixpoint m2m {A: Type} (m: res A) : SimplExpr.mon A :=
   match m with
@@ -35,12 +33,20 @@ Fixpoint m2m {A: Type} (m: res A) : SimplExpr.mon A :=
   | Error(_) => SimplExpr.error nil
   end.
 
-
+Declare Scope gensym_monad_scope_2.
 Notation "'gdo' X <- A ; B" := (SimplExpr.bind A (fun X => B))
-   (at level 200, X ident, A at level 100, B at level 200).
+   (at level 200, X ident, A at level 100, B at level 200)
+   : gensym_monad_scope_2.
+
+Notation "'gdo' ( X , Y ) <- A ; B" := (SimplExpr.bind2 A (fun X Y => B))
+   (at level 200, X ident, Y ident, A at level 100, B at level 200)
+   : gensym_monad_scope_2.
 
 Notation "'gdom' X <- A ; B" := (SimplExpr.bind (m2m A) (fun X => B))
-   (at level 200, X ident, A at level 100, B at level 200).
+   (at level 200, X ident, A at level 100, B at level 200)
+   : gensym_monad_scope_2.
+Local Open Scope gensym_monad_scope_2.
+
 
 
 
@@ -138,6 +144,20 @@ with labeled_rstatements : Type :=
 
 Locate int.
 
+Function transl_arglist
+  (ce: composite_env)
+  (al: list Clight.expr)
+  {struct al}:
+  res (list rexpr) :=
+  match al with
+  | nil => OK(nil)
+  | a1 :: a2 =>
+      do arg <- transl_expr ce a1 ;
+      do args <- transl_arglist ce a2 ;
+      OK(arg :: args)
+  end
+.
+
 Fixpoint transl_statement
   (ce: composite_env)
   (tyret: type) (nbrk ncnt: nat)
@@ -198,11 +218,8 @@ Fixpoint transl_statement
       | Some(n) => Some (n + 1)
       end in
 
-    (* TODO figure out how tuples work here *)
-    gdo transl_result <-
+    gdo (dflt_case_inner_stmt, labeled_match_stmts) <-
       transl_switch ce tyret nbrk ncnt stmts exp_ident_as_exp exp_typ dflt_ident_as_exp dflt_case_ty S_skip LSnil cur_loop_lbl switch_loop_lbl switch_loop_lbl ;
-
-    let (dflt_case_inner_stmt, labeled_match_stmts) := transl_result in
 
     let match_stmt := S_match_int exp_ident_as_exp labeled_match_stmts in
 
@@ -213,7 +230,10 @@ Fixpoint transl_statement
     let new_loop := S_loop switch_loop_lbl loop_body S_skip in
 
     SimplExpr.ret (S_sequence (S_sequence dflt_case_decl exp_decl) new_loop)
-  | Clight.Scall x b cl => SimplExpr.ret (S_skip)
+  | Clight.Scall x name al =>
+      gdom name' <- transl_expr ce name ;
+      gdom al' <- transl_arglist ce al ;
+      SimplExpr.ret (S_call x name' al')
   | Clight.Sbuiltin x ef tyargs bl => SimplExpr.ret (S_skip)
   | Clight.Sloop s1 s2 =>
       let loop_lbl :=
