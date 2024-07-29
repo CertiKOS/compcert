@@ -169,8 +169,10 @@ let rec print_expr fmt e =
 
 let rec print_arglist fmt arglist =
   match arglist with
+  | [arg] ->
+    fprintf fmt "%a" print_expr arg
   | arg :: al ->
-    print_expr fmt arg; print_arglist fmt al
+    fprintf fmt "%a, " print_expr arg; print_arglist fmt al
   | nil -> ()
 
 
