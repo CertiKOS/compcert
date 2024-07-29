@@ -167,10 +167,11 @@ let rec print_expr fmt e =
   | RustLight.Esizeof (_, _) -> fprintf fmt "unimplemented esizeof"
   | RustLight.Ealignof (_, _) -> fprintf fmt "unimplemented ealignof"
 
+
 let rec print_stmt fmt body =
   match body with
   | S_skip -> fprintf fmt "/* skip stmt */";
-  | S_assign(e1, e2) -> fprintf fmt "@[<hv 2> %a =@ %a;@]@ " print_expr e1 print_expr e2;
+  | S_assign(e1, e2) -> fprintf fmt "@[<hv 2>%a =@ %a;@]@ " print_expr e1 print_expr e2;
   | S_set(id, e) -> fprintf fmt "@[<hv 2>%s =@ %a;@]@ " (temp_name id) print_expr e;
   | S_return(Some exp) -> fprintf fmt "return %a;@ " print_expr exp
   | S_return(None) -> fprintf fmt "return;@ "
@@ -181,7 +182,7 @@ let rec print_stmt fmt body =
   | S_sequence(e1, e2) -> fprintf fmt "%a@ %a" print_stmt e1 print_stmt e2
   | S_continue -> fprintf fmt "continue;"
   | S_if_then_else(exp, s_true, S_skip)  -> (
-      fprintf fmt "if %a { @ %a; @ }" print_expr exp print_stmt s_true
+      fprintf fmt "@[<v 2>if %a {@ %a@;<0 -2>}@]" print_expr exp print_stmt s_true
     )
   | S_if_then_else(exp, S_skip, s_false)  -> (
       fprintf fmt "if !(%a) { @ %a; @ }" print_expr exp print_stmt s_false
@@ -191,7 +192,7 @@ let rec print_stmt fmt body =
         print_expr exp print_stmt s_true print_stmt s_false
     )
   | S_call(maybe_ident, exp, lexp) -> fprintf fmt "unimplemented call stmt"
-  | S_break(None) -> fprintf fmt "break; "
+  | S_break(None) -> fprintf fmt "break; @,"
   | S_break(Some(lbl)) -> fprintf fmt "unimplemented?!"
   | S_builtin(maybe_ident, external_fn, lty,  lexp) -> fprintf fmt "unimplemented call stmt"
   | S_loop(maybe_lbl, stmt, S_skip) -> (
@@ -199,22 +200,18 @@ let rec print_stmt fmt body =
               print_stmt stmt
     )
   | S_match_int(expr, stmts) -> (
-      fprintf fmt "match %a @ { @ " print_expr expr;
-      let current = ref stmts in
-      while !current <> LSnil do
-        match !current with
-        | LSnil -> fprintf fmt "@[<v 1> _ => () @] @"
-        | LScons (n, body, stmts) ->
-          (
-            fprintf fmt "%s => { @[<v 1>@ %a @; @] @ } @ " (Z.to_string n) print_stmt body;
-            current := stmts; ()
-          )
-      done;
-
-      fprintf fmt "}; @ "
-
+      fprintf fmt "@[<v 2>match %a {@ %a@;<0 -2>};@]" print_expr expr print_cases stmts;
     )
   | _ -> fprintf fmt "unimplemented?!"
+
+and print_cases fmt cases =
+  match cases with
+  | LSnil ->
+      fprintf fmt "@[<v 2>_ => () @]@,";
+  | LScons (n, body, stmts) ->
+      fprintf fmt "@[<v 2>%s => {@,%a@;<0 -2>}@]@," (Z.to_string n) print_stmt body;
+      print_cases fmt stmts
+
 
 
 (* fn name(param: ty, ) -> { body  }*)
