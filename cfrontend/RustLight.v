@@ -20,13 +20,13 @@ Local Open Scope error_monad_scope.
 (* - precedence *)
 (* - across the board handle attributes*)
 (* - module *)
+(* - pointer addition *)
 (* - builtins*)
-(*   - addrof for pointers *)
-(*   - sizeof *)
 (* - cast *)
 (* - goto *)
 (* - slides comparing generated assembly *)
 (* - slides: what am I doing about structs that don't fully initialize. *)
+(* - slides: alignof and sizeof signatures TODO do they match? also have to use generics*)
 (* - refactor transl function to be less gross *)
 
 Fixpoint m2m {A: Type} (m: res A) : SimplExpr.mon A :=

@@ -54,6 +54,7 @@ let rec gen_ty_rust ty =
   | Ctypes.Tunion(id, attr) -> (extern_atom id)
   | Ctypes.Tfloat(sz, a) -> name_floattype_rust sz
   | Ctypes.Tlong(sz, a) -> name_longtype_rust sz
+  | Ctypes.Tpointer(ty, _a) -> sprintf "*mut %s" (gen_ty_rust ty)
   | _ -> "unimplemented!"
 
 (* TODO control-flow precedence *)
@@ -118,11 +119,11 @@ let rec print_expr fmt e =
     end
   (* TODO fix type issue*)
   | Econst_int(n, ty) ->
-    fprintf fmt "%ld as %s" (camlint_of_coqint n) (gen_ty_rust ty)
+    fprintf fmt "(%ld as %s)" (camlint_of_coqint n) (gen_ty_rust ty)
   | Econst_float(f, ty) ->
-    fprintf fmt "%.18g as %s" (camlfloat_of_coqfloat f) (gen_ty_rust ty)
+    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat f) (gen_ty_rust ty)
   | Econst_single(f, ty) ->
-    fprintf fmt "%.18g as %s" (camlfloat_of_coqfloat32 f) (gen_ty_rust ty)
+    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat32 f) (gen_ty_rust ty)
   | Econst_long(n, Ctypes.Tlong(Unsigned, _)) ->
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
@@ -166,11 +167,19 @@ let rec print_expr fmt e =
       fprintf fmt "(%a %s %a)" print_expr e1 op_name print_expr e2
     )
   | RustLight.Efield (exp, id, ty) -> fprintf fmt "%a.%s" print_expr exp (extern_atom id)
-  | RustLight.Ederef (_, _) -> fprintf fmt "unimplemented ederef"
-  | RustLight.Eaddrof (_, _) -> fprintf fmt "unimplemented addrof"
-  | RustLight.Ecast (_, _) -> fprintf fmt "unimplemented ecast"
-  | RustLight.Esizeof (_, _) -> fprintf fmt "unimplemented esizeof"
-  | RustLight.Ealignof (_, _) -> fprintf fmt "unimplemented ealignof"
+  | RustLight.Ederef (exp, _ty) -> fprintf fmt "(*%a)" print_expr exp
+  (* TODO broken for globals. Need to special case that. *)
+  | RustLight.Eaddrof (exp, _) ->
+    fprintf fmt "(std::ptr::addr_of_mut!(%a))" print_expr exp
+  | RustLight.Ecast (expr, ty) ->
+    (* somewhat complicated because we might want to use *)
+    (* `as` on pointers *)
+    (* or https://doc.rust-lang.org/std/mem/fn.transmute.html *)
+    fprintf fmt "TODO casts are unimplemented"
+  | RustLight.Esizeof (ty, ty') ->
+    fprintf fmt "(std::mem::sizeof::<%s>() as %s)" (gen_ty_rust ty) (gen_ty_rust ty')
+  | RustLight.Ealignof (ty, ty') ->
+    fprintf fmt "(std::mem::alignof::<%s>() as %s)" (gen_ty_rust ty) (gen_ty_rust ty')
 
 let rec print_arglist fmt arglist =
   match arglist with

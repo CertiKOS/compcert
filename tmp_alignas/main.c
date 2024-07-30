@@ -24,5 +24,8 @@ int main() {
 
     union MyUnion myunion;
 
+    int c = __alignof__(struct MyStruct);
+    int b = sizeof(struct MyStruct);
+
     return 0;
 }
