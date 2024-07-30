@@ -283,7 +283,13 @@ let print_member fmt = function
   | _ -> ()
 
 let define_composite fmt (Composite(id, su, m, a)) =
-  fprintf fmt "#[repr(C)]@;@[<v 2>%s %s {" (struct_or_union su) (extern_atom id);
+  let maybe_aligned =
+    match a.attr_alignas with
+    | None -> ""
+    | Some n -> sprintf ", align(%Ld)" (Int64.shift_left 1L (N.to_int n))
+  in
+
+  fprintf fmt "#[repr(C%s)]@;@[<v 2>%s %s {" maybe_aligned (struct_or_union su) (extern_atom id);
   List.iter (print_member fmt) m;
   fprintf fmt "@;<0 -2>}@]@; @;"
 
