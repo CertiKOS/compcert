@@ -19,9 +19,6 @@ let temp_name (id: AST.ident) =
 
 let destination : string option ref = ref None
 
-let define_composite p (Composite(id, su, m, a)) = ()
-
-
 let name_inttype_rust sz sg =
   match sz, sg with
   | I8, Signed -> "libc::c_schar"
@@ -33,6 +30,16 @@ let name_inttype_rust sz sg =
   (* using bool here, unsure of corretness *)
   | IBool, _ -> "bool"
 
+let name_floattype_rust sz =
+  match sz with
+  | F32 -> "libc::c_float"
+  | F64 -> "libc::c_double"
+
+let name_longtype_rust sz =
+  match sz with
+  | Signed -> "libc::c_longlong"
+  | Unsigned -> "libc::c_ulonglong"
+
 let rec gen_ty_rust ty =
   match ty with
   | Ctypes.Tvoid -> "libc::c_void"
@@ -43,6 +50,10 @@ let rec gen_ty_rust ty =
   | Ctypes.Tarray(ity, num_ele, attrs) ->
     let fmted_ity = gen_ty_rust ity in
     sprintf "[ %s; %ld]"  fmted_ity (camlint_of_coqint num_ele)
+  | Ctypes.Tstruct(id, attr) -> (extern_atom id)
+  | Ctypes.Tunion(id, attr) -> (extern_atom id)
+  | Ctypes.Tfloat(sz, a) -> name_floattype_rust sz
+  | Ctypes.Tlong(sz, a) -> name_longtype_rust sz
   | _ -> "unimplemented!"
 
 (* TODO control-flow precedence *)
@@ -106,12 +117,12 @@ let rec print_expr fmt e =
     | _ -> "ERROR bool is outside {0, 1}"
     end
   (* TODO fix type issue*)
-  | Econst_int(n, _) ->
-    fprintf fmt "%ld" (camlint_of_coqint n)
-  | Econst_float(f, _) ->
-    fprintf fmt "%.18g" (camlfloat_of_coqfloat f)
-  | Econst_single(f, _) ->
-    fprintf fmt "%.18gf" (camlfloat_of_coqfloat32 f)
+  | Econst_int(n, ty) ->
+    fprintf fmt "%ld as %s" (camlint_of_coqint n) (gen_ty_rust ty)
+  | Econst_float(f, ty) ->
+    fprintf fmt "%.18g as %s" (camlfloat_of_coqfloat f) (gen_ty_rust ty)
+  | Econst_single(f, ty) ->
+    fprintf fmt "%.18g as %s" (camlfloat_of_coqfloat32 f) (gen_ty_rust ty)
   | Econst_long(n, Ctypes.Tlong(Unsigned, _)) ->
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
@@ -154,10 +165,10 @@ let rec print_expr fmt e =
       in
       fprintf fmt "(%a %s %a)" print_expr e1 op_name print_expr e2
     )
+  | RustLight.Efield (exp, id, ty) -> fprintf fmt "%a.%s" print_expr exp (extern_atom id)
   | RustLight.Ederef (_, _) -> fprintf fmt "unimplemented ederef"
   | RustLight.Eaddrof (_, _) -> fprintf fmt "unimplemented addrof"
   | RustLight.Ecast (_, _) -> fprintf fmt "unimplemented ecast"
-  | RustLight.Efield (_, _, _) -> fprintf fmt "unimplemented efield"
   | RustLight.Esizeof (_, _) -> fprintf fmt "unimplemented esizeof"
   | RustLight.Ealignof (_, _) -> fprintf fmt "unimplemented ealignof"
 
@@ -256,13 +267,25 @@ let print_fundef fmt id fundef =
   | Ctypes.Internal f -> print_function fmt id f
   (* don't need extern to be printed. However, do need use*)
   (* TODO print use keyword here *)
-  | Ctypes.External(_, _, _, _) ->  ()
+  | Ctypes.External(_, _, _, _) ->  fprintf fmt ""
 
 
 let print_globdef fmt (id, gd) =
   match gd with
   | Gfun fundef -> print_fundef fmt id fundef
   | Gvar v -> print_globvar fmt id v
+
+let struct_or_union = function Struct -> "struct" | Union -> "union"
+
+let print_member fmt = function
+  | Member_plain(id, ty) ->
+    fprintf fmt "@; %s," (gen_name_and_ty_rust (extern_atom id) ty)
+  | _ -> ()
+
+let define_composite fmt (Composite(id, su, m, a)) =
+  fprintf fmt "#[repr(C)]@;@[<v 2>%s %s {" (struct_or_union su) (extern_atom id);
+  List.iter (print_member fmt) m;
+  fprintf fmt "@;<0 -2>}@]@; @;"
 
 let print_program f (prog: RustLight.r_program) =
   let [@warning "-42"] p_types = prog.prog_types in

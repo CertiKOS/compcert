@@ -18,13 +18,15 @@ Local Open Scope error_monad_scope.
 
 (* TODO *)
 (* - precedence *)
-(* - loops *)
+(* - across the board handle attributes*)
 (* - module *)
-(* - all types of loops *)
-(* - addrof for pointers *)
-(* - sizeof *)
-(* - builtins *)
+(* - builtins*)
+(*   - addrof for pointers *)
+(*   - sizeof *)
+(* - cast *)
+(* - goto *)
 (* - slides comparing generated assembly *)
+(* - slides: what am I doing about structs that don't fully initialize. *)
 (* - refactor transl function to be less gross *)
 
 Fixpoint m2m {A: Type} (m: res A) : SimplExpr.mon A :=
@@ -468,6 +470,8 @@ Definition transl_fundef (ce: composite_env) (id: ident) (fn : Clight.fundef) : 
 Print transform_partial_program2.
 
 Print AST.transf_globdefs.
+
+Print Ctypes.program.
 
 Definition transl_program (c_prog: Clight.program) : res (Clight.program * r_program) :=
   do translated_fns <-  AST.transf_globdefs (transl_fundef c_prog.(prog_comp_env)) transl_globvar (c_prog.(prog_defs));
