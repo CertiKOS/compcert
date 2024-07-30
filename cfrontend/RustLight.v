@@ -18,7 +18,7 @@ Local Open Scope error_monad_scope.
 
 (* TODO *)
 (* - precedence *)
-(* - function calls *)
+(* - loops *)
 (* - module *)
 (* - all types of loops *)
 (* - addrof for pointers *)
@@ -350,18 +350,6 @@ Definition empty_r_fn : r_function := {|
                                |}.
 
 
-(* transl_lbl_stmt (ce: composite_env) (tyret: type) (nbrk ncnt: nat) *)
-(*                      (sl: Clight.labeled_statements) *)
-(*                      {struct sl}: res lbl_stmt := *)
-(*   match sl with *)
-(*   | Clight.LSnil => *)
-(*       OK LSnil *)
-(*   | Clight.LScons n s sl' => *)
-(*       do ts <- transl_statement ce tyret nbrk ncnt s; *)
-(*       do tsl' <- transl_lbl_stmt ce tyret nbrk ncnt sl'; *)
-(*       OK (LScons n ts tsl') *)
-(*   end. *)
-
 
 
 
@@ -450,14 +438,21 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) : res r_
   match body with
   | SimplExpr.Err msg => Error msg
   | SimplExpr.Res r_body r_g i =>
-      OK({|
-            fn_return := return_type;
-            fn_callconv := {| cc_structret := (AST.cc_structret (Clight.fn_callconv f)) |};
-            fn_params := f.(Clight.fn_params);
-            fn_vars := f.(Clight.fn_vars);
-            fn_temps := r_g.(SimplExpr.gen_trail);
-            fn_body := r_body;
-          |})
+      let cc := Clight.fn_callconv f in
+      match cc.(AST.cc_vararg) with
+      (* variadic. _n means # of fixed args *)
+      | Some _n => Error(msg "Variadics are currently unsupported when converting to rust")
+      (* not variadic *)
+      | None =>
+          OK({|
+                fn_return := return_type;
+                fn_callconv := {| cc_structret := (AST.cc_structret cc) |};
+                fn_params := f.(Clight.fn_params);
+                fn_vars := f.(Clight.fn_vars);
+                fn_temps := r_g.(SimplExpr.gen_trail);
+                fn_body := r_body;
+              |})
+      end
   end.
 
 
