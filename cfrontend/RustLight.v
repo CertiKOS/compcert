@@ -32,7 +32,7 @@ Local Open Scope error_monad_scope.
 Fixpoint m2m {A: Type} (m: res A) : SimplExpr.mon A :=
   match m with
   | OK(a) => SimplExpr.ret a
-  | Error(_) => SimplExpr.error nil
+  | Error(m) => SimplExpr.error m
   end.
 
 Declare Scope gensym_monad_scope_2.
@@ -78,47 +78,108 @@ Locate unary_operation.
 
 Search binary_operation.
 
+Print tt.
+
+Definition check_attr(ty: Ctypes.attr) : res (unit) :=
+  match ty.(attr_volatile) with
+  | false => OK(tt)
+  | true => Error(msg "unsupported attribute volatile")
+  end.
+
+Print Ctypes.type.
+
+Fixpoint check_ty (ty: Ctypes.type) : res (unit) :=
+  match ty with
+  | Ctypes.Tvoid => OK(tt)
+  | Ctypes.Tint _ _ a => check_attr a
+  | Ctypes.Tlong _ a => check_attr a
+  | Ctypes.Tfloat _ a => check_attr a
+  | Ctypes.Tpointer _ a => check_attr a
+  | Ctypes.Tarray _ _ a => check_attr a
+  | Ctypes.Tfunction tl ty _ =>
+      do _ <- check_typelist tl;
+      check_ty ty
+  | Ctypes.Tstruct _ a => check_attr a
+  | Ctypes.Tunion _ a => check_attr a
+  end
+with check_typelist(tl : typelist) : res (unit) :=
+  match tl with
+  | Ctypes.Tnil => OK(tt)
+  | Ctypes.Tcons ty tl =>
+      do _ <- check_ty ty;
+      check_typelist tl
+  end.
+
+
 Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : res (rexpr) :=
   match a with
   | Clight.Econst_int n ty =>
+      do _ <- check_ty ty;
       OK(Econst_int n ty)
   | Clight.Econst_float n ty =>
+      do _ <- check_ty ty;
       OK(Econst_float n ty)
   | Clight.Econst_single n ty =>
+      do _ <- check_ty ty;
       OK(Econst_single n ty)
   | Clight.Econst_long n ty =>
+      do _ <- check_ty ty;
       OK(Econst_long n ty)
   | Clight.Evar id ty =>
+      do _ <- check_ty ty;
       OK(Evar id ty)
   | Clight.Etempvar id ty =>
+      do _ <- check_ty ty;
       OK(Etempvar id ty)
   | Clight.Ederef b ty =>
+      do _ <- check_ty ty;
       do tb <- transl_expr ce b;
       OK(Ederef tb ty)
   | Clight.Eaddrof b ty =>
+      do _ <- check_ty ty;
       do tb <- transl_expr ce b;
       OK(Eaddrof tb ty)
   | Clight.Eunop op exp ty =>
+      do _ <- check_ty ty;
       do tb <- transl_expr ce exp;
       OK(Eunop op tb ty)
   | Clight.Ebinop op exp1 exp2 ty =>
+      do _ <- check_ty ty;
       do rexp1 <- transl_expr ce exp1;
       do rexp2 <- transl_expr ce exp2;
       (* TODO think about casting to different widths *)
       OK(Ebinop op rexp1 rexp2 ty)
   | Clight.Ecast exp ty =>
+      do _ <- check_ty ty;
       do rexp <- transl_expr ce exp;
       OK(Ecast rexp ty)
   | Clight.Efield exp ident ty =>
+      do _ <- check_ty ty;
       do rexp <- transl_expr ce exp;
       OK(Efield rexp ident ty)
   | Clight.Esizeof ty' ty =>
+      do _ <- check_ty ty;
       OK(Esizeof ty' ty)
   | Clight.Ealignof ty' ty =>
+      do _ <- check_ty ty;
       OK(Ealignof ty' ty)
   end.
 
 Print SimplExpr.transl_stmt.
+
+Record s_md : Type :=
+  mk_s_md {
+      ce: composite_env;
+      tyret: type;
+      nbrk: nat;
+      ncnt: nat;
+      cur_loop_lbl: option Z;
+      cur_switch_lbl: option Z;
+      next_lbl: option Z;
+    }.
+
+Print ce.
+
 
 
 (* TODO rename to be consistent *)
@@ -160,98 +221,127 @@ Function transl_arglist
   end
 .
 
+
 Fixpoint transl_statement
-  (ce: composite_env)
-  (tyret: type) (nbrk ncnt: nat)
-  (cur_loop_lbl: option Z)
-  (cur_switch_lbl: option Z)
-  (next_lbl: option Z)
+  (md : s_md)
   (s: Clight.statement) {struct s}
   : SimplExpr.mon rstatement
   :=
-  match s with
-  | Clight.Sskip => SimplExpr.ret (S_skip)
-  | Clight.Sassign lval rval =>
-      gdom r_val <-
+  match md with
+  | {|
+      ce := ce;
+      tyret := tyret;
+      nbrk := nbrk; ncnt := ncnt;
+      cur_loop_lbl := cur_loop_lbl;
+      cur_switch_lbl := cur_switch_lbl;
+      next_lbl := next_lbl;
+    |} =>
+    match s with
+    | Clight.Sskip => SimplExpr.ret (S_skip)
+    | Clight.Sassign lval rval =>
+        gdom r_val <-
           do r_lval <- transl_expr ce lval;
           do r_rval <- transl_expr ce rval;
           OK(S_assign r_lval r_rval);
-      SimplExpr.ret r_val
-  | Clight.Sifthenelse exp s1 s2 =>
-      gdom r_exp <- transl_expr ce exp;
-      gdo r_s1 <- transl_statement ce tyret nbrk ncnt cur_loop_lbl cur_switch_lbl next_lbl s1;
-      gdo r_s2 <- transl_statement ce tyret nbrk ncnt cur_loop_lbl cur_switch_lbl next_lbl s2;
-      SimplExpr.ret (S_if_then_else r_exp r_s1 r_s2)
-  | Clight.Sset x exp =>
-      gdom r_exp <- transl_expr ce exp;
-      SimplExpr.ret (S_set x r_exp)
-  | Clight.Ssequence exp1 exp2 =>
-      gdo r_exp1 <- transl_statement ce tyret nbrk ncnt cur_loop_lbl cur_switch_lbl next_lbl exp1;
-      gdo r_exp2 <- transl_statement ce tyret nbrk ncnt cur_loop_lbl cur_switch_lbl next_lbl exp2;
-      SimplExpr.ret (S_sequence r_exp1 r_exp2)
-  | Clight.Sreturn None => SimplExpr.ret (S_return None)
-  | Clight.Sreturn (Some exp) =>
-      gdom r_exp <- transl_expr ce exp;
-      SimplExpr.ret (S_return (Some r_exp))
-  | Clight.Sswitch exp stmts =>
-    let exp_typ := Clight.typeof exp in
-    let dflt_case_ty := Ctypes.Tint IBool Signed noattr in
-    let dflt_is_first :=
-      match stmts with
-      | Clight.LSnil => (Int.repr 0)
-      | Clight.LScons None _ _ => (Int.repr 1)
-      | Clight.LScons _ _ _ => (Int.repr 0)
-      end in
-    let dflt_case_val := Econst_int dflt_is_first dflt_case_ty in (*initial val *)
-    gdo dflt_case_ident <- SimplExpr.gensym dflt_case_ty ;
-    gdom r_exp <- transl_expr ce exp ;
-    gdo exp_ident <- SimplExpr.gensym exp_typ;
-    let exp_decl := S_set exp_ident r_exp in
+        SimplExpr.ret r_val
+    | Clight.Sifthenelse exp s1 s2 =>
+        gdom r_exp <- transl_expr ce exp;
+        gdo r_s1 <- transl_statement md s1;
+        gdo r_s2 <- transl_statement md s2;
+        SimplExpr.ret (S_if_then_else r_exp r_s1 r_s2)
+    | Clight.Sset x exp =>
+        gdom r_exp <- transl_expr ce exp;
+        SimplExpr.ret (S_set x r_exp)
+    | Clight.Ssequence exp1 exp2 =>
+        gdo r_exp1 <- transl_statement md exp1;
+        gdo r_exp2 <- transl_statement md exp2;
+        SimplExpr.ret (S_sequence r_exp1 r_exp2)
+    | Clight.Sreturn None => SimplExpr.ret (S_return None)
+    | Clight.Sreturn (Some exp) =>
+        gdom r_exp <- transl_expr ce exp;
+        SimplExpr.ret (S_return (Some r_exp))
+    | Clight.Sswitch exp stmts =>
+      let exp_typ := Clight.typeof exp in
+      let dflt_case_ty := Ctypes.Tint IBool Signed noattr in
+      let dflt_is_first :=
+        match stmts with
+        | Clight.LSnil => (Int.repr 0)
+        | Clight.LScons None _ _ => (Int.repr 1)
+        | Clight.LScons _ _ _ => (Int.repr 0)
+        end in
+      let dflt_case_val := Econst_int dflt_is_first dflt_case_ty in (*initial val *)
+      gdo dflt_case_ident <- SimplExpr.gensym dflt_case_ty ;
+      gdom r_exp <- transl_expr ce exp ;
+      gdo exp_ident <- SimplExpr.gensym exp_typ;
+      let exp_decl := S_set exp_ident r_exp in
 
-    let dflt_case_decl := S_set dflt_case_ident dflt_case_val in
+      let dflt_case_decl := S_set dflt_case_ident dflt_case_val in
 
-    let exp_ident_as_exp := Etempvar exp_ident exp_typ in
+      let exp_ident_as_exp := Etempvar exp_ident exp_typ in
 
-    let dflt_ident_as_exp := Etempvar dflt_case_ident dflt_case_ty in
+      let dflt_ident_as_exp := Etempvar dflt_case_ident dflt_case_ty in
 
-    let switch_loop_lbl :=
-      match next_lbl with
-      | None => Some 0%Z
-      | Some(n) => Some (n + 1)
-      end in
-
-    gdo (dflt_case_inner_stmt, labeled_match_stmts) <-
-      transl_switch ce tyret nbrk ncnt stmts exp_ident_as_exp exp_typ dflt_ident_as_exp dflt_case_ty S_skip LSnil cur_loop_lbl switch_loop_lbl switch_loop_lbl ;
-
-    let match_stmt := S_match_int exp_ident_as_exp labeled_match_stmts in
-
-    let if_dflt_stmt := S_if_then_else (dflt_ident_as_exp) dflt_case_inner_stmt S_skip in
-
-    let loop_body := S_sequence if_dflt_stmt match_stmt in
-
-    let new_loop := S_loop switch_loop_lbl loop_body S_skip in
-
-    SimplExpr.ret (S_sequence (S_sequence dflt_case_decl exp_decl) new_loop)
-  | Clight.Scall x name al =>
-      gdom name' <- transl_expr ce name ;
-      gdom al' <- transl_arglist ce al ;
-      SimplExpr.ret (S_call x name' al')
-  | Clight.Sbuiltin x ef tyargs bl => SimplExpr.ret (S_skip)
-  | Clight.Sloop s1 s2 =>
-      let loop_lbl :=
+      let switch_loop_lbl :=
         match next_lbl with
         | None => Some 0%Z
-        | Some(n) => Some(n+1)
-      end in
-      gdo r_s1 <- transl_statement ce tyret nbrk ncnt loop_lbl loop_lbl loop_lbl s1;
-      gdo r_s2 <- transl_statement ce tyret nbrk ncnt loop_lbl loop_lbl loop_lbl s2;
-      SimplExpr.ret (S_loop loop_lbl r_s1 r_s2)
-  | Clight.Sbreak => SimplExpr.ret (S_break cur_switch_lbl)
-  | Clight.Scontinue => SimplExpr.ret (S_continue cur_loop_lbl)
-  | Clight.Slabel lbl s => SimplExpr.ret (S_skip)
-  | Clight.Sgoto lbl => SimplExpr.ret (S_skip)
+        | Some(n) => Some (n + 1)
+        end in
+
+      let u_s_md :=
+        {|
+          ce := ce;
+          tyret := tyret;
+          nbrk := nbrk;
+          ncnt := ncnt;
+          cur_loop_lbl := cur_loop_lbl;
+          cur_switch_lbl := switch_loop_lbl;
+          next_lbl := switch_loop_lbl;
+        |} in
+
+      gdo (dflt_case_inner_stmt, labeled_match_stmts) <-
+        transl_switch u_s_md stmts exp_ident_as_exp exp_typ dflt_ident_as_exp dflt_case_ty S_skip LSnil ;
+
+      let match_stmt := S_match_int exp_ident_as_exp labeled_match_stmts in
+
+      let if_dflt_stmt := S_if_then_else (dflt_ident_as_exp) dflt_case_inner_stmt S_skip in
+
+      let loop_body := S_sequence if_dflt_stmt match_stmt in
+
+      let new_loop := S_loop switch_loop_lbl loop_body S_skip in
+
+      SimplExpr.ret (S_sequence (S_sequence dflt_case_decl exp_decl) new_loop)
+    | Clight.Scall x name al =>
+        gdom name' <- transl_expr ce name ;
+        gdom al' <- transl_arglist ce al ;
+        SimplExpr.ret (S_call x name' al')
+    | Clight.Sbuiltin x ef tyargs bl => SimplExpr.ret (S_skip)
+    | Clight.Sloop s1 s2 =>
+        let loop_lbl :=
+          match next_lbl with
+          | None => Some 0%Z
+          | Some(n) => Some(n+1)
+        end in
+        let u_s_md :=
+          {|
+            ce := ce;
+            tyret := tyret;
+            nbrk := nbrk;
+            ncnt := ncnt;
+            cur_loop_lbl := loop_lbl;
+            cur_switch_lbl := loop_lbl;
+            next_lbl := loop_lbl;
+          |} in
+        gdo r_s1 <- transl_statement u_s_md s1;
+        gdo r_s2 <- transl_statement u_s_md s2;
+        SimplExpr.ret (S_loop loop_lbl r_s1 r_s2)
+    | Clight.Sbreak => SimplExpr.ret (S_break cur_switch_lbl)
+    | Clight.Scontinue => SimplExpr.ret (S_continue cur_loop_lbl)
+    | Clight.Slabel lbl s => SimplExpr.ret (S_skip)
+    | Clight.Sgoto lbl => SimplExpr.ret (S_skip)
   end
-with transl_switch (ce: composite_env) (tyret: type) (nbrk ncnt: nat)
+end
+with transl_switch
+  (smd: s_md)
   (s: Clight.labeled_statements)
   (switch_exp: rexpr)
   (switch_exp_ty: type)
@@ -259,51 +349,63 @@ with transl_switch (ce: composite_env) (tyret: type) (nbrk ncnt: nat)
   (dd_exp_ty: type)
   (dflt_stmt: rstatement)
   (cases: labeled_rstatements)
-  (cur_loop_lbl: option Z) (cur_switch_lbl: option Z) (next_lbl: option Z)  {struct s}
+  {struct s}
   : SimplExpr.mon (rstatement * labeled_rstatements) :=
-  match s with
-  (* empty, just return *)
-  | Clight.LSnil => SimplExpr.ret (dflt_stmt, cases)
-  (* normal case *)
-  | Clight.LScons (Some cur_lbl) stmt ls =>
-      (
-        gdo body <- transl_statement ce tyret nbrk ncnt cur_loop_lbl cur_switch_lbl next_lbl stmt;
-        match ls with
-        | Clight.LSnil =>
-            SimplExpr.ret (dflt_stmt, LScons cur_lbl (S_sequence body (S_break cur_switch_lbl)) cases)
-        | Clight.LScons (Some next_lbl_) _ _ =>
-            (
-              let stmt_1 := S_assign switch_exp (Econst_int (Int.repr next_lbl_) switch_exp_ty) in
-              let mod_body := S_sequence body stmt_1 in
-              transl_switch ce tyret nbrk ncnt ls switch_exp switch_exp_ty dd_exp dd_exp_ty dflt_stmt (LScons cur_lbl mod_body cases) cur_loop_lbl cur_switch_lbl next_lbl
-            )
-        | Clight.LScons None _ _ =>
-            (
-              let stmt_1 := S_assign dd_exp (Econst_int (Int.repr 1) dd_exp_ty) in
-              let mod_body := S_sequence body stmt_1 in
-              transl_switch ce tyret nbrk ncnt ls switch_exp switch_exp_ty dd_exp dd_exp_ty dflt_stmt (LScons cur_lbl mod_body cases) cur_loop_lbl cur_switch_lbl next_lbl
-            )
-        end
-      )
-  (* default case *)
-  | Clight.LScons None stmt ls =>
-      (
-        gdo body <- transl_statement ce tyret nbrk ncnt cur_loop_lbl cur_switch_lbl next_lbl stmt ;
-        match ls with
-        (* no next statement. Default is last. Break after default *)
-        | Clight.LSnil => SimplExpr.ret (S_sequence body (S_break cur_switch_lbl), cases)
-        (* there's more, get next label*)
-        | Clight.LScons (Some lbl) _ _ =>
-            (
-              let stmt_1 := S_assign switch_exp (Econst_int (Int.repr lbl) switch_exp_ty) in
-              let stmt_2 := S_assign dd_exp (Econst_int (Int.repr 0) dd_exp_ty) in
-              let mod_body := S_sequence (S_sequence body stmt_1) stmt_2 in
-              transl_switch ce tyret nbrk ncnt ls switch_exp switch_exp_ty dd_exp dd_exp_ty mod_body cases cur_loop_lbl cur_switch_lbl next_lbl
-            )
-        (* impossible to hit. Only can be one default *)
-        | Clight.LScons _ _ _ =>  SimplExpr.ret (S_sequence body (S_break cur_switch_lbl), cases)
-        end
-      )
+  (* TODO replace with let (ce, _, _...) := smd in.. *)
+  match smd with
+  | {|
+      ce := ce;
+      tyret := tyret;
+      nbrk := nbrk; ncnt := ncnt;
+      cur_loop_lbl := cur_loop_lbl;
+      cur_switch_lbl := cur_switch_lbl;
+      next_lbl := next_lbl;
+    |} =>
+    match s with
+    (* empty, just return *)
+    | Clight.LSnil => SimplExpr.ret (dflt_stmt, cases)
+    (* normal case *)
+    | Clight.LScons (Some cur_lbl) stmt ls =>
+        (
+          gdo body <- transl_statement smd stmt;
+          match ls with
+          | Clight.LSnil =>
+              SimplExpr.ret (dflt_stmt, LScons cur_lbl (S_sequence body (S_break cur_switch_lbl)) cases)
+          | Clight.LScons (Some next_lbl_) _ _ =>
+              (
+                let stmt_1 := S_assign switch_exp (Econst_int (Int.repr next_lbl_) switch_exp_ty) in
+                let mod_body := S_sequence body stmt_1 in
+                transl_switch smd ls switch_exp switch_exp_ty dd_exp dd_exp_ty dflt_stmt (LScons cur_lbl mod_body cases)
+              )
+          | Clight.LScons None _ _ =>
+              (
+                let stmt_1 := S_assign dd_exp (Econst_int (Int.repr 1) dd_exp_ty) in
+                let mod_body := S_sequence body stmt_1 in
+                transl_switch smd ls switch_exp switch_exp_ty dd_exp dd_exp_ty dflt_stmt (LScons cur_lbl mod_body cases)
+              )
+          end
+        )
+    (* default case *)
+    | Clight.LScons None stmt ls =>
+        (
+          gdo body <- transl_statement smd stmt ;
+          match ls with
+          (* no next statement. Default is last. Break after default *)
+          | Clight.LSnil => SimplExpr.ret (S_sequence body (S_break cur_switch_lbl), cases)
+          (* there's more, get next label*)
+          | Clight.LScons (Some lbl) _ _ =>
+              (
+                let stmt_1 := S_assign switch_exp (Econst_int (Int.repr lbl) switch_exp_ty) in
+                let stmt_2 := S_assign dd_exp (Econst_int (Int.repr 0) dd_exp_ty) in
+                let mod_body := S_sequence (S_sequence body stmt_1) stmt_2 in
+                transl_switch smd ls switch_exp switch_exp_ty dd_exp dd_exp_ty mod_body cases
+              )
+          (* impossible to hit. Only can be one default *)
+          (* TODO this should return an error since it's impossible to hit *)
+          | Clight.LScons _ _ _ =>  SimplExpr.ret (S_sequence body (S_break cur_switch_lbl), cases)
+          end
+        )
+    end
   end.
 
 
@@ -436,7 +538,16 @@ Definition reconstruct_generator (trail: list (ident * type)) : SimplExpr.genera
 Definition transl_internal_fun (ce: composite_env) (f: Clight.function) : res r_function :=
   let return_type := (Clight.fn_return f) in
   let generator := reconstruct_generator f.(Clight.fn_temps) in
-  let body := transl_statement ce return_type 1%nat 0%nat None None None (Clight.fn_body f) generator in
+  let smd := {|
+              ce := ce;
+              tyret := return_type;
+              nbrk := 1%nat;
+              ncnt := 0%nat;
+              cur_loop_lbl := None;
+              cur_switch_lbl := None;
+              next_lbl := None;
+            |} in
+  let body := transl_statement smd (Clight.fn_body f) generator in
   match body with
   | SimplExpr.Err msg => Error msg
   | SimplExpr.Res r_body r_g i =>
