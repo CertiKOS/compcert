@@ -310,11 +310,21 @@ let print_program f (prog: RustLight.r_program) =
   List.iter (print_globdef f) p_defs;
   fprintf f "@]@."
 
-let print_if (_, prog) =
+let change_directory dir_name =
+  try
+    Unix.chdir dir_name;  (* Change the current working directory *)
+  with
+  | Unix.Unix_error (err, _, _) ->
+    Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
+
+let print_if mapping prog =
+  printf "PRINTING RUST LIGHT";
   match !destination with
   | None -> ()
     (* printf "%s" "Camels\n"; *)
   | Some f ->
+    change_directory "./rust_project/src/";
     let oc = open_out f in
     print_program (formatter_of_out_channel oc) prog;
     close_out oc;
+    change_directory "../..";

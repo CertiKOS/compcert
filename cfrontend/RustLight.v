@@ -16,6 +16,11 @@ Require Clight.
 Require Cshmgen.
 Local Open Scope error_monad_scope.
 
+Print Ctypes.program.
+Locate Genv.t.
+
+Print Ctypes.prog_public.
+
 (* TODO *)
 (* - precedence *)
 (* - across the board handle attributes*)
@@ -24,10 +29,8 @@ Local Open Scope error_monad_scope.
 (* - builtins*)
 (* - cast *)
 (* - goto *)
-(* - slides comparing generated assembly *)
 (* - slides: what am I doing about structs that don't fully initialize. *)
 (* - slides: alignof and sizeof signatures TODO do they match? also have to use generics*)
-(* - refactor transl function to be less gross *)
 
 Fixpoint m2m {A: Type} (m: res A) : SimplExpr.mon A :=
   match m with
@@ -207,7 +210,7 @@ with labeled_rstatements : Type :=
 
 Locate int.
 
-Function transl_arglist
+Fixpoint transl_arglist
   (ce: composite_env)
   (al: list Clight.expr)
   {struct al}:
@@ -220,7 +223,6 @@ Function transl_arglist
       OK(arg :: args)
   end
 .
-
 
 Fixpoint transl_statement
   (md : s_md)
@@ -584,7 +586,7 @@ Print AST.transf_globdefs.
 
 Print Ctypes.program.
 
-Definition transl_program (c_prog: Clight.program) : res (Clight.program * r_program) :=
+Definition transl_program (c_prog: Clight.program) : res (r_program) :=
   do translated_fns <-  AST.transf_globdefs (transl_fundef c_prog.(prog_comp_env)) transl_globvar (c_prog.(prog_defs));
   let r_prog :=
     {|
@@ -595,6 +597,6 @@ Definition transl_program (c_prog: Clight.program) : res (Clight.program * r_pro
       Ctypes.prog_comp_env := c_prog.(prog_comp_env);
       Ctypes.prog_comp_env_eq := c_prog.(prog_comp_env_eq);
     |} in
-  OK(c_prog, r_prog).
+  OK(r_prog).
 
 (* Error(msg "not implemented yet"). *)

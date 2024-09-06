@@ -1501,6 +1501,8 @@ Section PROGRAMS.
 
 Variable F: Type.
 
+Locate external_function.
+
 (** Functions can either be defined ([Internal]) or declared as
   external functions ([External]). *)
 

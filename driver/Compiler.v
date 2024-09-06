@@ -77,7 +77,8 @@ Require Import Compopts.
 
 (** Pretty-printers (defined in Caml). *)
 Parameter print_Clight: Clight.program -> unit.
-Parameter print_Rustlight: (Clight.program * RustLight.r_program) -> unit.
+Parameter print_Rustlight: list (string * string) -> RustLight.r_program -> unit.
+Parameter extract_Symbols: Clight.program -> (list string).
 Parameter print_Cminor: Cminor.program -> unit.
 Parameter print_RTL: Z -> RTL.program -> unit.
 Parameter print_LTL: LTL.program -> unit.
@@ -174,12 +175,29 @@ Definition transf_clight_program (p: Clight.program) : res Asm.program :=
 Definition drop_rustlight (p: (Clight.program * RustLight.r_program)) : res Clight.program :=
   OK (fst p).
 
+Definition get_exports (p: Csyntax.program) : res (list string) :=
+  OK p
+  @@@ SimplExpr.transl_program
+  @@@ (fun (p': Clight.program) => OK(extract_Symbols p')).
+
+Definition identity_rprog (p: RustLight.r_program) : res RustLight.r_program := OK(p).
+
+Definition print_r_program (mapping: list (string * string) ) (p: Csyntax.program)
+  : res RustLight.r_program :=
+  OK p
+  @@@ SimplExpr.transl_program
+  @@@ RustLight.transl_program
+  @@ print (print_Rustlight mapping)
+  @@@ identity_rprog
+.
+
+
 Definition transf_c_program (p: Csyntax.program) : res Asm.program :=
   OK p
   @@@ time "Clight generation" SimplExpr.transl_program
-  @@@ RustLight.transl_program
-  @@ print print_Rustlight
-  @@@ drop_rustlight
+  (* @@@ RustLight.transl_program *)
+  (* @@ print print_Rustlight *)
+  (* @@@ drop_rustlight *)
   @@@ transf_clight_program.
 
 (** Force [Initializers] and [Cexec] to be extracted as well. *)

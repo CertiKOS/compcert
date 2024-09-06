@@ -76,6 +76,8 @@ let preprocess ifile ofile =
     List.rev !prepro_options;
     [ifile]
   ] in
+  printf "\nif: %s, of: %s, \n" ifile ofile ;
+  List.iter (printf "cmd %s") cmd ;
   let exc = command ?stdout:output cmd in
   if exc <> 0 then begin
     if ofile <> "-" then safe_remove ofile;

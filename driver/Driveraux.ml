@@ -137,6 +137,6 @@ let push_linker_arg arg =
 
 let perform_actions () =
   let rec perform = function
-  | [] -> []
-  | (fn, arg) :: rem -> let res = fn arg in res :: perform rem
+  | [] -> printf "%s" "empty"; []
+  | (fn, arg) :: rem -> let res = fn arg in printf "%s" arg; res :: perform rem
   in perform (List.rev !actions)

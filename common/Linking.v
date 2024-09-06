@@ -836,7 +836,11 @@ Record Pass (S T: Language) := mkpass {
   pass_match_link: @TransfLink (lang_prog S) (lang_prog T) (lang_link S) (lang_link T) pass_match
 }.
 
+Print Pass.
+
 Arguments mkpass {S} {T} (pass_match) {pass_match_link}.
+
+Print mkpass.
 
 Program Definition pass_identity (l: Language): Pass l l :=
   {| pass_match := fun p1 p2 => p1 = p2;

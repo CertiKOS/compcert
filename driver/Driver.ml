@@ -24,6 +24,8 @@ open Diagnostics
 (* Name used for version string etc. *)
 let tool_name = "C verified compiler"
 
+let sym_mapping : ((string, string) Hashtbl.t) ref = ref (Hashtbl.create 7)
+
 (* Optional sdump suffix *)
 let sdump_suffix = ref ".json"
 
@@ -36,10 +38,25 @@ let object_filename sourcename =
   else
     tmp_file ".o"
 
+
+let extract_globals sourcename =
+  ensure_inputfile_exists sourcename;
+  let preproname = tmp_file ".i" in
+  preprocess sourcename preproname;
+  let csyntax = parse_c_file sourcename preproname in
+  Compiler.get_exports csyntax
+
+let convert_mapping (tbl : (string, string) Hashtbl.t) : (char list * char list) list =
+  Hashtbl.fold
+    (fun key value acc ->
+      (String.to_seq key |> List.of_seq, String.to_seq value |> List.of_seq) :: acc)
+    tbl
+    []
+
 (* From CompCert C AST to asm *)
 
 let compile_c_file sourcename ifile ofile =
-
+  printf"\nCOMPILE_C IS CALLED\n";
   (*  *set the destinations (e.g. pointers) if we want to print *)
 
   (* Prepare to dump Clight, RTL, etc, if requested *)
@@ -59,7 +76,12 @@ let compile_c_file sourcename ifile ofile =
   set_dest AsmToJSON.destination option_sdump !sdump_suffix;
   (* Parse the ast *)
   let csyntax = parse_c_file sourcename ifile in
-  (* IF drust flag is set *)
+  let regular_mapping = convert_mapping !sym_mapping in
+
+  match (Compiler.print_r_program regular_mapping csyntax) with
+  | Errors.OK _rprog -> printf "translated!"
+  | Errors.Error msg -> printf "error!"
+  ;
   (* (1) call out to transf_rust_program *)
   (* (2)  *)
   (* (3)  *)
@@ -97,6 +119,7 @@ let compile_c_file sourcename ifile ofile =
 (* From C source to asm *)
 
 let compile_i_file sourcename preproname =
+  printf"\nCOMPILE_I IS CALLED\n";
   if !option_interp then begin
     Machine.config := Machine.compcert_interpreter !Machine.config;
     let csyntax = parse_c_file sourcename preproname in
@@ -117,9 +140,18 @@ let compile_i_file sourcename preproname =
     objname
   end
 
+let create_directory dir_name =
+try
+  Unix.mkdir dir_name 0o755;  (* 0o755 is the permission code *)
+  Printf.printf "Directory '%s' created successfully.\n" dir_name
+with
+| Unix.Unix_error (err, _, _) ->
+  Printf.printf "\nError creating directory: %s with error %s\n\n" dir_name (Unix.error_message err)
+
 (* Processing of a .c file *)
 
 let process_c_file sourcename =
+  printf"\nPROCESS_C IS CALLED\n";
   ensure_inputfile_exists sourcename;
   if !option_E then begin
     preprocess sourcename (output_filename_default "-");
@@ -245,6 +277,7 @@ Code generation options: (use -fno-<opt> to turn off -f<opt>)
   -dltl          Save LTL after register allocation in <file>.ltl
   -dmach         Save generated Mach code in <file>.mach
   -drustlight    Save generated Rust code in <file>.rs
+  -drustproj     Save generated Rust code in rust project. Use in conjunction with drustlight.
   -dasm          Save generated assembly in <file>.s
   -dall          Save all generated intermediate files in <file>.<ext>
   -sdump         Save info for post-linking validation in <file>.json
@@ -282,6 +315,37 @@ let unset_all opts () = List.iter (fun r -> r := false) opts
 let num_source_files = ref 0
 
 let num_input_files = ref 0
+
+let list_c_files = ref ([])
+
+let char_list_list_to_string_list (cll : char list list) : string list =
+  List.map (fun cl -> String.of_seq (List.to_seq cl)) cll
+
+let print_string_list lst =
+  print_string "[";
+  List.iter (fun x -> Printf.printf "\"%s\"; " x) lst;
+  print_string "]\n"
+
+let add_to_list file = list_c_files := !list_c_files @ [file]
+
+let print_hashtbl tbl =
+  printf "SYMBOL MAPPING: \n";
+  Hashtbl.iter (fun key value -> Printf.printf "%s: %s\n" key value) tbl;
+  printf "END SYMBOL MAPPING\n"
+
+let generate_mapping unit =
+  (* symbol -> module in rust that exports it *)
+  List.iter
+    (fun file_name ->
+       let module_name = String.sub file_name 0 ((String.length file_name) - 2) in
+       let glob_list = extract_globals file_name in
+       (match glob_list with
+        | Errors.OK l -> List.iter
+                           (fun symbol ->
+                              Hashtbl.add !sym_mapping symbol module_name) (char_list_list_to_string_list l)
+        | Errors.Error _ -> printf "ERROR making mapping!"; ())
+
+    ) !list_c_files
 
 let cmdline_actions =
   let f_opt name ref =
@@ -357,6 +421,7 @@ let cmdline_actions =
   Exact "-dalloctrace", Set option_dalloctrace;
   Exact "-dmach", Set option_dmach;
   Exact "-drustlight", Set option_drustlight;
+  Exact "-drustproj", Set option_drustproj;
   Exact "-dasm", Set option_dasm;
   Exact "-dall", Self (fun _ ->
     option_dprepro := true;
@@ -401,8 +466,9 @@ let cmdline_actions =
   Prefix "-", Self (fun s ->
       fatal_error no_loc "Unknown option `%s'" s);
 (* File arguments *)
-  Suffix ".c", Self (fun s ->
-      push_action process_c_file s; incr num_source_files; incr num_input_files);
+  Suffix ".c", Self (* the entire function here gets executed *) (fun s ->
+      printf "next cmd: %s\n" s; add_to_list s; print_string_list !list_c_files; push_action process_c_file s;
+      incr num_source_files; incr num_input_files);
   Suffix ".i", Self (fun s ->
       push_action process_i_file s; incr num_source_files; incr num_input_files);
   Suffix ".p", Self (fun s ->
@@ -423,6 +489,49 @@ let cmdline_actions =
       push_action process_h_file s; incr num_source_files; incr num_input_files);
   ]
 
+let create_toml unit =
+  let oc = open_out "Cargo.toml" in  (* Open the file for writing *)
+  let content = {|
+[package]
+name = "rust_project"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+libc = "0.2.158"
+
+[[bin]]
+./src/|} ^ (Hashtbl.find !sym_mapping "main") ^ ".rs" in
+  output_string oc content;      (* Write the string to the file *)
+  close_out oc
+
+let create_lib unit =
+  let content = List.fold_left
+      (fun result file ->
+         let module_name = String.sub file 0 ((String.length file) - 2) in
+         result^"\npub mod "^module_name^";\n") "" !list_c_files in
+  let oc = open_out "lib.rs" in
+  output_string oc content;
+  close_out oc
+
+
+let change_directory dir_name =
+  try
+    Unix.chdir dir_name;  (* Change the current working directory *)
+  with
+  | Unix.Unix_error (err, _, _) ->
+    Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
+
+let generate_boilerplate_rust unit =
+  create_directory "rust_project";
+  change_directory "./rust_project";
+  create_toml ();
+  create_directory "src";
+  change_directory "./src";
+  create_lib ();
+  change_directory "../..";
+  ()
+
 let _ =
   try
     Gc.set { (Gc.get()) with
@@ -434,16 +543,20 @@ let _ =
     printf "%s" "starting spot that is actually called\n";
     parse_cmdline cmdline_actions;
     DebugInit.init (); (* Initialize the debug functions *)
+    generate_mapping ();
+    generate_boilerplate_rust ();
+    (* print_hashtbl !sym_mapping; *)
     if nolink () && !option_o <> None && !num_source_files >= 2 then
       fatal_error no_loc "ambiguous '-o' option (multiple source files)";
     if !num_input_files = 0 then
       fatal_error no_loc "no input file";
     if not !option_interp && !main_function_name <> "main" then
       fatal_error no_loc "option '-main' requires option '-interp'";
-    let linker_args = time "Total compilation time" perform_actions () in
-    if not (nolink ()) && linker_args <> [] then begin
-      linker (output_filename_default "a.out") linker_args
-    end;
+    (* the line below is where all the compilation goes *)
+    let _linker_args = time "Total compilation time" perform_actions () in
+    (* if not (nolink ()) && linker_args <> [] then begin *)
+    (*   linker (output_filename_default "a.out") linker_args *)
+    (* end; *)
     check_errors ()
   with
   | Sys_error msg

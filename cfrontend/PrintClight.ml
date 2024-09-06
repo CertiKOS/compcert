@@ -327,3 +327,10 @@ let print_if prog = print_if_gen Clight1 prog
    SimplLocals pass.  It receives Clight2 syntax. *)
 let print_if_2 prog = print_if_gen Clight2 prog
 
+let string_list_to_char_list_list (str_list: string list) : char list list =
+  List.map (fun s -> List.init (String.length s) (String.get s)) str_list
+
+
+let extract_symbols (prog : Clight.program) : (char List.t) List.t =
+  let vars = prog.prog_public in
+  string_list_to_char_list_list (List.map extern_atom vars)
