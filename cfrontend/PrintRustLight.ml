@@ -27,7 +27,7 @@ let name_inttype_rust sz sg =
   | I16, Unsigned -> "libc::c_ushort"
   | I32, Signed -> "libc::c_int"
   | I32, Unsigned -> "libc::c_uint"
-  (* using bool here, unsure of corretness *)
+  (* using bool here, unsure of correctness since libc doesn't have _Bool *)
   | IBool, _ -> "bool"
 
 let name_floattype_rust sz =
@@ -128,8 +128,8 @@ let rec print_expr fmt e =
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
     fprintf fmt "%LdLL" (camlint64_of_coqint n)
-  | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id)
-  | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
+  | RustLight.Evar (id, _ty) -> fprintf fmt "%sVAR" (extern_atom id)
+  | RustLight.Etempvar (id, _ty) -> fprintf fmt "%sTMPVAR" (temp_name id)
   | RustLight.Eunop (op_ty, exp, _ty) ->
     (
       let op_name =
@@ -230,14 +230,15 @@ let rec print_stmt fmt body =
   | S_match_int(expr, stmts) -> (
       fprintf fmt "@[<v 2>match %a {@;%a@;<0 -2>};@]@;" print_expr expr print_cases stmts;
     )
+  (* the difference between these two cases is the assignment to a temporary var vs discard *)
   | S_call(Some(id), name, arg_list) -> (
-      fprintf fmt "@[<hv 2>%s =@ %a@,(@[<hov 0>%a@]);@]"
+      fprintf fmt "@[<hv 2>%s =@ %a@,(@[<hov 0>%a@]);CALLWID@]"
         (temp_name id)
         print_expr name
         print_arglist arg_list
     )
   | S_call(None, name, arg_list) -> (
-      fprintf fmt "@[<hv 2>%a@,(@[<hov 0>%a@]);@]"
+      fprintf fmt "@[<hv 2>%a@,(@[<hov 0>%a@]);CALLWIOID@]"
         print_expr name
         print_arglist arg_list
     )
