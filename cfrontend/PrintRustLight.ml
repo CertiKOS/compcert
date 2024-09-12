@@ -3,6 +3,16 @@ open! Ctypes
 open AST
 open Camlcoq (*for extern_atom*)
 open RustLight
+
+
+
+let pretty_print_hashtbl tbl =
+  Format.printf "UID {@.";
+  Hashtbl.iter (fun key value ->
+    Format.printf "UID  %s -> %s@,\n" key value
+  ) tbl;
+  Format.printf "UID}@."
+
 (*open Camlcoq
 open PrintAST
 open Ctypes
@@ -128,8 +138,8 @@ let rec print_expr fmt e =
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
     fprintf fmt "%LdLL" (camlint64_of_coqint n)
-  | RustLight.Evar (id, _ty) -> fprintf fmt "%sVAR" (extern_atom id)
-  | RustLight.Etempvar (id, _ty) -> fprintf fmt "%sTMPVAR" (temp_name id)
+  | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id)
+  | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
   | RustLight.Eunop (op_ty, exp, _ty) ->
     (
       let op_name =
@@ -232,13 +242,13 @@ let rec print_stmt fmt body =
     )
   (* the difference between these two cases is the assignment to a temporary var vs discard *)
   | S_call(Some(id), name, arg_list) -> (
-      fprintf fmt "@[<hv 2>%s =@ %a@,(@[<hov 0>%a@]);CALLWID@]"
+      fprintf fmt "@[<hv 2>%s =@ %a@,(@[<hov 0>%a@]);@]"
         (temp_name id)
         print_expr name
         print_arglist arg_list
     )
   | S_call(None, name, arg_list) -> (
-      fprintf fmt "@[<hv 2>%a@,(@[<hov 0>%a@]);CALLWIOID@]"
+      fprintf fmt "@[<hv 2>%a@,(@[<hov 0>%a@]);@]"
         print_expr name
         print_arglist arg_list
     )
@@ -303,10 +313,76 @@ let define_composite fmt (Composite(id, su, m, a)) =
   List.iter (print_member fmt) m;
   fprintf fmt "@;<0 -2>}@]@; @;"
 
-let print_program f (prog: RustLight.r_program) =
-  let [@warning "-42"] p_types = prog.prog_types in
+module StringSet = Set.Make(String)
+
+let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
+  printf "UID list of ids %d\n" (List.length list_of_ids);
+  List.fold_left
+    (fun acc id ->
+       let name = extern_atom id in
+       let maybe_module = Hashtbl.find_opt mapping name in
+       match maybe_module with
+       | None -> printf "UID couldn't find module for symbol %s in mapping\n" name; acc
+       | Some module_ ->
+         let maybe_hs = Hashtbl.find_opt acc module_ in
+         match maybe_hs with
+         | None ->
+           let new_hs = StringSet.singleton name in
+           Hashtbl.replace acc module_ new_hs;
+           acc
+         | Some hs ->
+           let new_hs = StringSet.add name hs in
+           Hashtbl.replace acc module_ new_hs;
+           acc
+    )
+    cur_sym_map list_of_ids
+
+
+let [@warning "-42"] gen_imports (mapping: (string, string) Hashtbl.t)
+    (fn_defs: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list)) : (string, StringSet.t) Hashtbl.t =
+  List.fold_left
+    (fun acc (elt: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) ->
+
+       match elt with
+       | id, Gvar v ->  if (List.length v.gvar_init == 0) then get_fn_foreign_syms mapping [id] acc else acc
+       | _id, Gfun f -> (
+           match f with
+           | Internal rf -> (
+               get_fn_foreign_syms mapping (List.map fst (Maps.PTree.elements rf.fn_imports)) acc
+             )
+           | External _ -> acc
+       )
+    )
+    (Hashtbl.create 7) fn_defs
+
+let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) =
+  Hashtbl.iter (fun module_ impts ->
+        fprintf fmt "@[";
+        let elts = StringSet.elements impts in
+        let size = List.length elts in
+        if size == 1 then
+          let ele = List.hd elts in
+          fprintf fmt "use crate::%s::%s;" module_ ele
+        else
+          fprintf fmt "use crate::%s::{" module_;
+          List.iter (fun x -> fprintf fmt "%s, " x) elts;
+          fprintf fmt "};"
+        ;
+        fprintf fmt "@]@;"
+      ) import_map;
+  fprintf fmt "@;"
+
+let print_program (mapping: (string, string) Hashtbl.t) f (prog: RustLight.r_program) =
   let [@warning "-42"] p_defs = prog.prog_defs in
+  let imports = gen_imports mapping p_defs in
+
+  let [@warning "-42"] p_types = prog.prog_types in
   fprintf f "@[<v 0>";
+
+  (* do printing  *)
+
+  print_imports f imports;
+
   List.iter (define_composite f) p_types;
   List.iter (print_globdef f) p_defs;
   fprintf f "@]@."
@@ -318,14 +394,21 @@ let change_directory dir_name =
   | Unix.Unix_error (err, _, _) ->
     Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
 
-let print_if mapping prog =
-  printf "PRINTING RUST LIGHT";
+let fix_mapping_types (mapping: (char list * char list) list) : (string, string) Hashtbl.t =
+  let elts = List.map (fun (a, b) -> (String.of_seq (List.to_seq a), String.of_seq (List.to_seq b))) mapping in
+  List.fold_left (fun acc (k, v) -> Hashtbl.replace acc k v; acc) (Hashtbl.create 7) elts
+
+let print_if (clunky_mapping: (char list * char list) list) prog =
   match !destination with
   | None -> ()
     (* printf "%s" "Camels\n"; *)
   | Some f ->
+    let mapping = fix_mapping_types clunky_mapping in
+    (* let len_mapping = Hashtbl.length mapping in *)
+    printf "UID hashtbl";
+    pretty_print_hashtbl mapping;
     change_directory "./rust_project/src/";
     let oc = open_out f in
-    print_program (formatter_of_out_channel oc) prog;
+    print_program mapping (formatter_of_out_channel oc) prog;
     close_out oc;
     change_directory "../..";

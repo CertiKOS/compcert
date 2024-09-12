@@ -436,7 +436,7 @@ Record r_function : Type := mkrfunction {
   fn_body: rstatement;
   (* the external symbols that are used*)
   (* we use this in printing*)
-  fn_imports: list ident;
+  fn_imports: PTree.t unit;
 }.
 
 Print type.
@@ -457,7 +457,7 @@ Definition empty_r_fn : r_function := {|
                                  fn_vars := nil;
                                  fn_temps := nil;
                                  fn_body := S_skip;
-                                 fn_imports := nil;
+                                 fn_imports := PTree.empty _;
                                |}.
 
 
@@ -544,23 +544,34 @@ Definition reconstruct_generator (trail: list (ident * type)) : SimplExpr.genera
 
 Print rstatement.
 
-Fixpoint walk_r_expr_for_symbols (in_scope_syms: PTree.t unit) (expr: rexpr) : list ident :=
+Definition merge_trees (a: PTree.t unit) (b: PTree.t unit) : PTree.t unit :=
+  PTree.fold (fun (acc: PTree.t unit) (id: ident) (_unit : unit) => PTree.set id tt acc) a b.
+
+  (* get ids tree 1*)
+  (* get ids tree 2*)
+  (* map them into new tree *)
+
+Fixpoint walk_r_expr_for_symbols (in_scope_syms: PTree.t unit) (expr: rexpr) : PTree.t unit :=
   let walk_r_expr := walk_r_expr_for_symbols in_scope_syms in
   match expr with
-    | Evar id _ => nil
+    | Evar id _ =>
+        match PTree.get id in_scope_syms with
+        | None => PTree.set id tt (PTree.empty _)
+        | Some tt => PTree.empty _
+        end
     | Ederef exp _ => walk_r_expr exp
     | Eaddrof exp _ => walk_r_expr exp
     | Eunop _ exp _ => walk_r_expr exp
-    | Ebinop _ exp1 exp2 _ty => (walk_r_expr exp1) ++ (walk_r_expr exp2)
+    | Ebinop _ exp1 exp2 _ty => merge_trees (walk_r_expr exp1) (walk_r_expr exp2)
     | Ecast exp _ty => walk_r_expr exp
     | Efield exp _id _ty => walk_r_expr exp
-    | _ => nil
+    | _ => PTree.empty _
   end.
 
-Fixpoint handle_exprs (in_scope_syms: PTree.t unit) (stmts: list rexpr) : list ident :=
+Fixpoint handle_exprs (in_scope_syms: PTree.t unit) (stmts: list rexpr) : PTree.t unit :=
   match stmts with
-  | nil => nil
-  | a :: b => (walk_r_expr_for_symbols in_scope_syms a) ++ (handle_exprs in_scope_syms b)
+  | nil => PTree.empty _
+  | a :: b => merge_trees (walk_r_expr_for_symbols in_scope_syms a) (handle_exprs in_scope_syms b)
   end.
 
 Locate PTree.
@@ -569,35 +580,36 @@ Locate PTree.
 (* TODO instead of doing all this symbol pushing I can simply *)
 (* use ce.genv_defs to check symbol defns when constructing this *)
 (* TODO rename *)
-Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement) : list ident :=
+Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement) : PTree.t unit :=
   let walk_r_expr := walk_r_expr_for_symbols in_scope_syms in
   let walk_r_stmt := walk_r_body_for_symbols in_scope_syms in
   match stmt with
-  | S_skip => nil
-  | S_assign rexpr_1 rexpr_2 => (walk_r_expr rexpr_1) ++ (walk_r_expr rexpr_2)
+  | S_skip => PTree.empty _
+  | S_assign rexpr_1 rexpr_2 => merge_trees (walk_r_expr rexpr_1) (walk_r_expr rexpr_2)
   | S_set _ rexpr => (walk_r_expr rexpr)
-  | S_sequence s_1 s_2 => (walk_r_stmt s_1) ++ (walk_r_stmt s_2)
-  | S_continue _ => nil
-  | S_loop _ s_1 s_2 => (walk_r_stmt s_1) ++ (walk_r_stmt s_2)
+  | S_sequence s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
+  | S_continue _ => PTree.empty _
+  | S_loop _ s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_match_int rexpr ls =>
-      (walk_r_expr rexpr) ++ handle_ls_stmt in_scope_syms (ls)
-  | S_builtin _ _ _ _ => nil
-  | S_if_then_else rexpr rstmt_1 rstmt_2 => (walk_r_expr rexpr) ++ (walk_r_stmt rstmt_1) ++ (walk_r_stmt rstmt_2)
-  | S_break _int => nil
+      merge_trees (walk_r_expr rexpr) (handle_ls_stmt in_scope_syms (ls))
+  | S_builtin _ _ _ _ => PTree.empty _
+  | S_if_then_else rexpr rstmt_1 rstmt_2 => merge_trees (merge_trees (walk_r_expr rexpr) (walk_r_stmt rstmt_1)) (walk_r_stmt rstmt_2)
+  | S_break _int => PTree.empty _
   | S_return maybe_rexpr =>
       match maybe_rexpr with
       | Some rexpr => (walk_r_expr rexpr)
-      | None => nil
+      | None => PTree.empty _
       end
   (* TODO think about shadowing. Might need to ensure there's no other variable, but can easily do this with function metadata *)
   (* TODO this is possible in the case of a function pointer in which case we don't need to import anything *)
-  | S_call _ r_expr l_rexpr => (handle_exprs in_scope_syms l_rexpr) ++ (walk_r_expr r_expr)
+  | S_call _ r_expr l_rexpr => merge_trees (handle_exprs in_scope_syms l_rexpr) (walk_r_expr r_expr)
   end
-with handle_ls_stmt (in_scope_syms: PTree.t unit) (ls: labeled_rstatements) : list ident :=
+with handle_ls_stmt (in_scope_syms: PTree.t unit) (ls: labeled_rstatements) : PTree.t unit :=
   match ls with
-  | LSnil => nil
-  | LScons _ rstatement ls => (walk_r_body_for_symbols in_scope_syms rstatement) ++ (handle_ls_stmt in_scope_syms ls)
+  | LSnil => PTree.empty _
+  | LScons _ rstatement ls => merge_trees (walk_r_body_for_symbols in_scope_syms rstatement) (handle_ls_stmt in_scope_syms ls)
   end.
+
 
 Locate map.
 
@@ -638,11 +650,12 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
                 fn_vars := f.(Clight.fn_vars);
                 fn_temps := r_g.(SimplExpr.gen_trail);
                 fn_body := r_body;
-                fn_imports := (walk_r_body_for_symbols in_scope_symbols r_body);
+                fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
               |})
       end
   end.
 
+(* TODO forget external functions now *)
 Definition transl_fundef (ce: composite_env) (glob_syms: list ident) (id: ident) (fn : Clight.fundef) : res r_fundef :=
   match fn with
     | Ctypes.Internal f =>
@@ -657,11 +670,24 @@ Print AST.transf_globdefs.
 
 Print Ctypes.program.
 
+(* TODO usage between files *)
+
 Definition transl_program (c_prog: Clight.program) : res (r_program) :=
-  let global_symbols := (map fst c_prog.(Ctypes.prog_defs)) in
+  (* symbols that we know to be in scope already *)
+  let global_symbols :=
+    map fst (filter (fun (prog_symbols: (_ * globdef (Ctypes.fundef Clight.function) type)) =>
+       match (snd prog_symbols) with
+       | Gfun (Ctypes.Internal _) => true
+       | Gvar v => true
+       | _ => false
+       end)
+     c_prog.(Ctypes.prog_defs)) in
+  (* TODO need to evalualte the initialization expression in case it involves say taking an address of a gloval variable from another file *)
+  (* low priority *)
   do translated_fns <-  AST.transf_globdefs (transl_fundef c_prog.(prog_comp_env) global_symbols) transl_globvar (c_prog.(prog_defs));
   let r_prog :=
     {|
+      (* PUBLIC only *)
       Ctypes.prog_defs := translated_fns;
       Ctypes.prog_public := c_prog.(prog_public);
       Ctypes.prog_main := c_prog.(prog_main);
@@ -670,5 +696,3 @@ Definition transl_program (c_prog: Clight.program) : res (r_program) :=
       Ctypes.prog_comp_env_eq := c_prog.(prog_comp_env_eq);
     |} in
   OK(r_prog).
-
-(* Error(msg "not implemented yet"). *)

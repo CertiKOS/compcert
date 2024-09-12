@@ -332,5 +332,16 @@ let string_list_to_char_list_list (str_list: string list) : char list list =
 
 
 let extract_symbols (prog : Clight.program) : (char List.t) List.t =
-  let vars = prog.prog_public in
+  let [@warning "-40"] [@warning "-42"] vars = List.filter_map
+      (fun (id, dfn) ->
+         match dfn with
+         (* can't be undefined. If it is, then it's defined in another file/external *)
+         | AST.Gvar v -> if List.length v.gvar_init > 0 then Some id else None
+         | AST.Gfun f -> (
+             match f with
+             | Internal _ -> Some id
+             | External _ -> None
+           )
+      )
+      prog.prog_defs in
   string_list_to_char_list_list (List.map extern_atom vars)

@@ -188,8 +188,7 @@ Definition print_r_program (mapping: list (string * string) ) (p: Csyntax.progra
   @@@ SimplExpr.transl_program
   @@@ RustLight.transl_program
   @@ print (print_Rustlight mapping)
-  @@@ identity_rprog
-.
+  @@@ identity_rprog.
 
 
 Definition transf_c_program (p: Csyntax.program) : res Asm.program :=

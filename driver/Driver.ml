@@ -56,7 +56,7 @@ let convert_mapping (tbl : (string, string) Hashtbl.t) : (char list * char list)
 (* From CompCert C AST to asm *)
 
 let compile_c_file sourcename ifile ofile =
-  printf"\nCOMPILE_C IS CALLED\n";
+  (* printf"\nCOMPILE_C IS CALLED\n"; *)
   (*  *set the destinations (e.g. pointers) if we want to print *)
 
   (* Prepare to dump Clight, RTL, etc, if requested *)
@@ -329,9 +329,9 @@ let print_string_list lst =
 let add_to_list file = list_c_files := !list_c_files @ [file]
 
 let print_hashtbl tbl =
-  printf "SYMBOL MAPPING: \n";
-  Hashtbl.iter (fun key value -> Printf.printf "%s: %s\n" key value) tbl;
-  printf "END SYMBOL MAPPING\n"
+  printf "UID SYMBOL MAPPING: \n";
+  Hashtbl.iter (fun key value -> Printf.printf "UID %s: %s\n" key value) tbl;
+  printf "UID END SYMBOL MAPPING\n"
 
 let generate_mapping unit =
   (* symbol -> module in rust that exports it *)
@@ -345,7 +345,7 @@ let generate_mapping unit =
                               Hashtbl.add !sym_mapping symbol module_name) (char_list_list_to_string_list l)
         | Errors.Error _ -> printf "ERROR making mapping!"; ())
 
-    ) !list_c_files
+    ) !list_c_files; print_hashtbl !sym_mapping
 
 let cmdline_actions =
   let f_opt name ref =

@@ -570,6 +570,13 @@ Inductive fundef (F: Type): Type :=
   | Internal: F -> fundef F
   | External: external_function -> fundef F.
 
+(* RustLight.r_function Ctypes.fundef *)
+
+(* type 'f fundef = *)
+(*     Internal of 'f *)
+(*   | External of AST.external_function * Ctypes.typelist * Ctypes.coq_type * *)
+(*       AST.calling_convention *)
+
 Arguments External [F].
 
 Section TRANSF_FUNDEF.
