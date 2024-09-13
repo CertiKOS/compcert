@@ -314,7 +314,8 @@ let define_composite fmt (Composite(id, su, m, a)) =
     | Some n -> sprintf ", align(%Ld)" (Int64.shift_left 1L (N.to_int n))
   in
 
-  fprintf fmt "#[repr(C%s)]@;@[<v 2>pub%s %s {" maybe_aligned (struct_or_union su) (extern_atom id);
+  (* either I define this locally or I'm importing it. Even if this is a local-only thing, it's hidden behind the module so this is fine *)
+  fprintf fmt "#[repr(C%s)]@;@[<v 2>pub %s %s {" maybe_aligned (struct_or_union su) (extern_atom id);
   List.iter (print_member fmt) m;
   fprintf fmt "@;<0 -2>}@]@; @;"
 
