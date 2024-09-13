@@ -269,10 +269,11 @@ and print_cases fmt cases =
 let print_function fmt id fn =
   let fn_name = (extern_atom id) in
   let fn_params = fn.fn_params in
+  let fn_linkage = if C2C.atom_is_static id then "" else "pub " in
   let fn_args = List.fold_left (fun acc (tid, tty) -> acc ^ (gen_name_and_ty_rust (extern_atom tid) tty) ^ ", ") ("") fn_params in
   (* let params = name_function_parameters extern_atom (extern_atom id) f.fn_params f.fn_callconv in *)
   (* TODO deal with visibility modifier *)
-  fprintf fmt "#[no_mangle]@ unsafe extern \"C\" fn %s(%s) -> %s" fn_name fn_args (gen_ty_rust fn.fn_return);
+  fprintf fmt "#[no_mangle]@ %sunsafe extern \"C\" fn %s(%s) -> %s" fn_linkage fn_name fn_args (gen_ty_rust fn.fn_return);
   fprintf fmt "@ @[<v 2>{@ ";
   (* TODO find an example that uses this *)
   List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (extern_atom vid) vty) ) fn.fn_vars;
@@ -306,13 +307,14 @@ let print_member fmt = function
   | _ -> ()
 
 let define_composite fmt (Composite(id, su, m, a)) =
+  (* let linkage = C2C.atom_is_static *)
   let maybe_aligned =
     match a.attr_alignas with
     | None -> ""
     | Some n -> sprintf ", align(%Ld)" (Int64.shift_left 1L (N.to_int n))
   in
 
-  fprintf fmt "#[repr(C%s)]@;@[<v 2>%s %s {" maybe_aligned (struct_or_union su) (extern_atom id);
+  fprintf fmt "#[repr(C%s)]@;@[<v 2>pub%s %s {" maybe_aligned (struct_or_union su) (extern_atom id);
   List.iter (print_member fmt) m;
   fprintf fmt "@;<0 -2>}@]@; @;"
 
@@ -401,14 +403,14 @@ let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_i
         fprintf fmt "@[";
         let elts = StringSet.elements impts in
         let size = List.length elts in
-        if size == 1 then
+        (if size == 1 then
           let ele = List.hd elts in
           fprintf fmt "use crate::%s::%s;" module_ ele
-        else
+        else (
           fprintf fmt "use crate::%s::{" module_;
           List.iter (fun x -> fprintf fmt "%s, " x) elts;
           fprintf fmt "};"
-        ;
+        ));
         fprintf fmt "@]@;"
       ) import_map;
   fprintf fmt "@;"
@@ -481,4 +483,3 @@ let print_if
     change_directory "../..";
 
 (* TODOS undo the c2c hack *)
-(* can just use c2c.atom_is_static + pub qualifier  *)
