@@ -26,6 +26,9 @@ let tool_name = "C verified compiler"
 
 let sym_mapping : ((string, string) Hashtbl.t) ref = ref (Hashtbl.create 7)
 
+(* struct or union ident -> (file, defn) option  *)
+let composite_mapping: ((string, ((string * Ctypes.composite_definition) option)) Hashtbl.t) ref = ref (Hashtbl.create 7)
+
 (* Optional sdump suffix *)
 let sdump_suffix = ref ".json"
 
@@ -41,6 +44,7 @@ let object_filename sourcename =
 
 let extract_globals sourcename =
   ensure_inputfile_exists sourcename;
+  (* printf "\nPTYPES: %s\n" sourcename; *)
   let preproname = tmp_file ".i" in
   preprocess sourcename preproname;
   let csyntax = parse_c_file sourcename preproname in
@@ -52,6 +56,14 @@ let convert_mapping (tbl : (string, string) Hashtbl.t) : (char list * char list)
       (String.to_seq key |> List.of_seq, String.to_seq value |> List.of_seq) :: acc)
     tbl
     []
+
+let convert_mapping1 (tbl: (string, (string * Ctypes.composite_definition) option) Hashtbl.t) =
+  Hashtbl.fold (
+    fun key opt acc ->
+      match opt with
+      | Some ((v, dfn)) -> (String.to_seq key |> List.of_seq, Some ((String.to_seq v |> List.of_seq), dfn)) :: acc
+      | None -> (String.to_seq key |> List.of_seq, None) :: acc
+  ) tbl []
 
 (* From CompCert C AST to asm *)
 
@@ -76,9 +88,12 @@ let compile_c_file sourcename ifile ofile =
   set_dest AsmToJSON.destination option_sdump !sdump_suffix;
   (* Parse the ast *)
   let csyntax = parse_c_file sourcename ifile in
-  let regular_mapping = convert_mapping !sym_mapping in
+  let regular_sym_mapping = convert_mapping !sym_mapping in
+  let regular_composite_mapping = convert_mapping1 !composite_mapping in
 
-  match (Compiler.print_r_program regular_mapping csyntax) with
+  let module_name = String.sub sourcename 0 ((String.length sourcename) - 2) in
+
+  match (Compiler.print_r_program regular_sym_mapping regular_composite_mapping (String.to_seq module_name |> List.of_seq) csyntax) with
   | Errors.OK _rprog -> printf "translated!"
   | Errors.Error msg -> printf "error!"
   ;
@@ -318,8 +333,10 @@ let num_input_files = ref 0
 
 let list_c_files = ref ([])
 
+let t_conv_fn = fun cl -> String.of_seq (List.to_seq cl)
+
 let char_list_list_to_string_list (cll : char list list) : string list =
-  List.map (fun cl -> String.of_seq (List.to_seq cl)) cll
+  List.map t_conv_fn cll
 
 let print_string_list lst =
   print_string "[";
@@ -333,6 +350,35 @@ let print_hashtbl tbl =
   Hashtbl.iter (fun key value -> Printf.printf "UID %s: %s\n" key value) tbl;
   printf "UID END SYMBOL MAPPING\n"
 
+let [@warning "-42"] comp_eq a a_ =
+  match a,a_ with
+  | Ctypes.Composite (_, sou, mems, attrs), Ctypes.Composite(_, sou_, mems_, attrs_) -> (
+      let sou_r =
+        match (sou, sou_) with
+        | (Ctypes.Union, Ctypes.Union) -> true
+        | (Ctypes.Struct, Ctypes.Struct) -> true
+        | _ -> false
+      in
+      let mem_eq_fn = fun m_1 m_2 -> (
+          match (m_1, m_2) with
+          | Ctypes.Member_plain(_, ty), Ctypes.Member_plain(_, ty') -> ty = ty'
+          | Ctypes.Member_bitfield(_, a, b, c, d, e), Ctypes.Member_bitfield(_, a', b', c', d', e') ->
+            a = a' && b = b' && c = c' && d = d' && e = e'
+          | _ -> false
+        )
+      in
+      let mems_r =
+        if (List.length mems) != (List.length mems_) then
+          false
+        else
+          List.fold_left (fun acc (a, b) -> (mem_eq_fn a b) && acc)
+            true
+            (List.combine mems mems_)
+      in
+      let attrs_r = attrs = attrs_ in
+      sou_r && mems_r && attrs_r
+    )
+
 let generate_mapping unit =
   (* symbol -> module in rust that exports it *)
   List.iter
@@ -340,9 +386,26 @@ let generate_mapping unit =
        let module_name = String.sub file_name 0 ((String.length file_name) - 2) in
        let glob_list = extract_globals file_name in
        (match glob_list with
-        | Errors.OK l -> List.iter
+        | Errors.OK l -> (List.iter
                            (fun symbol ->
-                              Hashtbl.add !sym_mapping symbol module_name) (char_list_list_to_string_list l)
+                              Hashtbl.add !sym_mapping symbol module_name) (char_list_list_to_string_list (fst l))
+                          ;
+                          List.iter (fun (sym_chars, dfn) -> (
+                              let sym = t_conv_fn sym_chars in
+                              match Hashtbl.find_opt !composite_mapping sym with
+                              (* first occurence *)
+                              | None -> Hashtbl.replace !composite_mapping sym (Some((module_name, dfn)))
+                              (* set to none explicitly, do nothing *)
+                              | Some (None) -> printf "UUID explicitly setting to NONE\n"; ()
+                              | Some (Some (f, dfn_old)) -> (
+                                  (* let (sou, mems, attrs) = match dfn with | Ctypes.Composite(_,a,b,c) -> (a, b, c) in *)
+                                  (* let (sou_o, mems_o, attrs_o) = match dfn_old with | Ctypes.Composite(_,a,b,c) -> (a, b, c) in *)
+                                  if not (comp_eq dfn dfn_old) then
+                                    (* printf "sou is struct: %b, sou_o is struct %b" (sou == Ctypes.Struct) (sou_o == Ctypes.Union); *)
+                                    (* printf "UUID inequal for %s with %b %b %b, replacing!\n" sym (sou = sou_o) (mems = mems_o) (attrs = attrs_o) ; *)
+                                    (Hashtbl.replace !composite_mapping sym None)
+                              )
+                          )) (snd l))
         | Errors.Error _ -> printf "ERROR making mapping!"; ())
 
     ) !list_c_files; print_hashtbl !sym_mapping
@@ -491,6 +554,7 @@ let cmdline_actions =
 
 let create_toml unit =
   let oc = open_out "Cargo.toml" in  (* Open the file for writing *)
+  (* TODO is there a less ugly way to do this without carrying the whitespace? *)
   let content = {|
 [package]
 name = "rust_project"
@@ -501,7 +565,7 @@ edition = "2021"
 libc = "0.2.158"
 
 [[bin]]
-./src/|} ^ (Hashtbl.find !sym_mapping "main") ^ ".rs" in
+path = "./src/|} ^ (Hashtbl.find !sym_mapping "main") ^ ".rs\"" in
   output_string oc content;      (* Write the string to the file *)
   close_out oc
 

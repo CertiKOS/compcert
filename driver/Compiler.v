@@ -77,8 +77,8 @@ Require Import Compopts.
 
 (** Pretty-printers (defined in Caml). *)
 Parameter print_Clight: Clight.program -> unit.
-Parameter print_Rustlight: list (string * string) -> RustLight.r_program -> unit.
-Parameter extract_Symbols: Clight.program -> (list string).
+Parameter print_Rustlight: list (string * string) -> (list (string * (option (string * Ctypes.composite_definition)))) -> string -> RustLight.r_program -> unit.
+Parameter extract_Symbols: Clight.program -> (list string * list (string * Ctypes.composite_definition)).
 Parameter print_Cminor: Cminor.program -> unit.
 Parameter print_RTL: Z -> RTL.program -> unit.
 Parameter print_LTL: LTL.program -> unit.
@@ -175,19 +175,23 @@ Definition transf_clight_program (p: Clight.program) : res Asm.program :=
 Definition drop_rustlight (p: (Clight.program * RustLight.r_program)) : res Clight.program :=
   OK (fst p).
 
-Definition get_exports (p: Csyntax.program) : res (list string) :=
+Definition get_exports (p: Csyntax.program) : res (list string* list (string* Ctypes.composite_definition)) :=
   OK p
   @@@ SimplExpr.transl_program
   @@@ (fun (p': Clight.program) => OK(extract_Symbols p')).
 
 Definition identity_rprog (p: RustLight.r_program) : res RustLight.r_program := OK(p).
 
-Definition print_r_program (mapping: list (string * string) ) (p: Csyntax.program)
+Definition print_r_program
+  (sym_mapping: list (string * string))
+  (composite_mapping: list (string * option (string * Ctypes.composite_definition)))
+  (name: string)
+  (p: Csyntax.program)
   : res RustLight.r_program :=
   OK p
   @@@ SimplExpr.transl_program
   @@@ RustLight.transl_program
-  @@ print (print_Rustlight mapping)
+  @@ print (print_Rustlight sym_mapping composite_mapping name)
   @@@ identity_rprog.
 
 

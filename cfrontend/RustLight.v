@@ -655,7 +655,7 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
       end
   end.
 
-(* TODO forget external functions now *)
+(* TODO forget external functions now. We don't care about them. *)
 Definition transl_fundef (ce: composite_env) (glob_syms: list ident) (id: ident) (fn : Clight.fundef) : res r_fundef :=
   match fn with
     | Ctypes.Internal f =>
@@ -670,7 +670,12 @@ Print AST.transf_globdefs.
 
 Print Ctypes.program.
 
-(* TODO usage between files *)
+(* what Im going to do for types (struct, union) *)
+(* prog_types are file local types *)
+(* prog_types are file local types, so add those to global_symbols *)
+(* look through the types in the walk
+   and add them to the tree if they're not in global_symbols
+*)
 
 Definition transl_program (c_prog: Clight.program) : res (r_program) :=
   (* symbols that we know to be in scope already *)
@@ -687,7 +692,7 @@ Definition transl_program (c_prog: Clight.program) : res (r_program) :=
   do translated_fns <-  AST.transf_globdefs (transl_fundef c_prog.(prog_comp_env) global_symbols) transl_globvar (c_prog.(prog_defs));
   let r_prog :=
     {|
-      (* PUBLIC only *)
+      (* PUBLIC only fns *)
       Ctypes.prog_defs := translated_fns;
       Ctypes.prog_public := c_prog.(prog_public);
       Ctypes.prog_main := c_prog.(prog_main);

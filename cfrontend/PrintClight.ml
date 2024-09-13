@@ -327,11 +327,17 @@ let print_if prog = print_if_gen Clight1 prog
    SimplLocals pass.  It receives Clight2 syntax. *)
 let print_if_2 prog = print_if_gen Clight2 prog
 
+let tmp_conv_fn = fun s -> List.init (String.length s) (String.get s)
+
 let string_list_to_char_list_list (str_list: string list) : char list list =
-  List.map (fun s -> List.init (String.length s) (String.get s)) str_list
+  List.map tmp_conv_fn str_list
 
 
-let extract_symbols (prog : Clight.program) : (char List.t) List.t =
+
+(* TODO go through prog_types too and add to symbols *)
+
+let extract_symbols (prog : Clight.program)
+  : ((char List.t) List.t * ((char List.t) * Ctypes.composite_definition) List.t) =
   let [@warning "-40"] [@warning "-42"] vars = List.filter_map
       (fun (id, dfn) ->
          match dfn with
@@ -344,4 +350,15 @@ let extract_symbols (prog : Clight.program) : (char List.t) List.t =
            )
       )
       prog.prog_defs in
-  string_list_to_char_list_list (List.map extern_atom vars)
+  let tys =  (
+    List.map (fun ty -> (tmp_conv_fn (extern_atom (match ty with Composite (id, _, _, _) -> id)), ty)) prog.prog_types
+  ) in
+  (* let _ = printf "\nPTYPES HI I RAN"; List.map *)
+  (*   (fun x -> *)
+  (*     match x with *)
+  (*     | Ctypes.Composite (iden, _, _, _) -> ( *)
+  (*         printf "\nPTYPES : %s\n" (extern_atom iden) *)
+  (*       ) *)
+  (*   ) *)
+  (*   prog.prog_types in *)
+  (string_list_to_char_list_list (List.map extern_atom vars), tys)

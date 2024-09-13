@@ -7,11 +7,13 @@ open RustLight
 
 
 let pretty_print_hashtbl tbl =
-  Format.printf "UID {@.";
+  Format.printf "UUID {@.";
   Hashtbl.iter (fun key value ->
-    Format.printf "UID  %s -> %s@,\n" key value
+      match value with
+      | Some(s, _) -> Format.printf "UUID  %s -> Some %s@,\n" key s
+      | None -> Format.printf "UUID  %s -> None @,\n" key
   ) tbl;
-  Format.printf "UID}@."
+  Format.printf "UUID}@."
 
 (*open Camlcoq
 open PrintAST
@@ -338,24 +340,62 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
     cur_sym_map list_of_ids
 
 
-let [@warning "-42"] gen_imports (mapping: (string, string) Hashtbl.t)
-    (fn_defs: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list)) : (string, StringSet.t) Hashtbl.t =
-  List.fold_left
-    (fun acc (elt: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) ->
+let [@warning "-42"] gen_imports
+    (sym_mapping: (string, string) Hashtbl.t)
 
+    (fn_defs: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list))
+
+    composite_mapping
+    prog_types
+    mod_name
+
+  : ((string, StringSet.t) Hashtbl.t * _) =
+  let imports_from_gbls_syms = List.fold_left
+    (fun acc (elt: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) ->
        match elt with
-       | id, Gvar v ->  if (List.length v.gvar_init == 0) then get_fn_foreign_syms mapping [id] acc else acc
+       | id, Gvar v ->  if (List.length v.gvar_init == 0) then get_fn_foreign_syms sym_mapping [id] acc else acc
        | _id, Gfun f -> (
            match f with
            | Internal rf -> (
-               get_fn_foreign_syms mapping (List.map fst (Maps.PTree.elements rf.fn_imports)) acc
+               get_fn_foreign_syms sym_mapping (List.map fst (Maps.PTree.elements rf.fn_imports)) acc
              )
            | External _ -> acc
        )
     )
-    (Hashtbl.create 7) fn_defs
+    (Hashtbl.create 7) fn_defs in
+  let defined_in_module  =
+    List.filter (
+      fun dfn ->
+        let r = match dfn with | Composite(id, _,  _, _) -> extern_atom id in
+        match Hashtbl.find_opt composite_mapping r with
+        (* not possible? *)
+        | None -> printf "UUID: NOT FOUND STRUCT %s" r; false
+        (* might be external to module *)
+        | Some (Some (mname, _)) -> printf "\nUUID: mod name %s, %s len modname: %d, nmame %d, eq %b\n" mod_name mname (String.length mod_name) (String.length mname) (mname = mod_name) ; mname = mod_name
+        (* internal to module *)
+        | Some (None) -> true
+    ) prog_types in
+  let imports_from_composite = List.fold_left (
+    fun (acc : (string, StringSet.t) Hashtbl.t) elt -> (
+        let r = match elt with | Composite(id, _,  _, _) -> extern_atom id in
+        match Hashtbl.find_opt composite_mapping r with
+        (* internal to module *)
+        | Some(None) -> acc
+        (* not possible? *)
+        | None -> printf "NOT FOUND STRUCT %s" r; acc
+        (* might be external to module *)
+        | Some (Some (mname, _)) -> (
+          if mname == mod_name then
+            acc
+          else
+            match Hashtbl.find_opt acc mname with
+            | Some hs -> Hashtbl.replace acc mname (StringSet.add r hs); acc
+            | None -> acc
+      )
+  )) imports_from_gbls_syms prog_types in
+  (imports_from_composite, defined_in_module)
 
-let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) =
+let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) =
   Hashtbl.iter (fun module_ impts ->
         fprintf fmt "@[";
         let elts = StringSet.elements impts in
@@ -372,18 +412,21 @@ let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) =
       ) import_map;
   fprintf fmt "@;"
 
-let print_program (mapping: (string, string) Hashtbl.t) f (prog: RustLight.r_program) =
+let print_program (sym_mapping: (string, string) Hashtbl.t) composite_mapping mod_name f (prog: RustLight.r_program) =
   let [@warning "-42"] p_defs = prog.prog_defs in
-  let imports = gen_imports mapping p_defs in
-
   let [@warning "-42"] p_types = prog.prog_types in
+
+  let (imports, in_module_composite_dfns) = gen_imports sym_mapping p_defs composite_mapping p_types mod_name in
+
   fprintf f "@[<v 0>";
 
   (* do printing  *)
 
-  print_imports f imports;
+  print_imports f imports composite_mapping;
 
-  List.iter (define_composite f) p_types;
+  List.iter (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom id)) in_module_composite_dfns;
+
+  List.iter (define_composite f) in_module_composite_dfns;
   List.iter (print_globdef f) p_defs;
   fprintf f "@]@."
 
@@ -398,17 +441,40 @@ let fix_mapping_types (mapping: (char list * char list) list) : (string, string)
   let elts = List.map (fun (a, b) -> (String.of_seq (List.to_seq a), String.of_seq (List.to_seq b))) mapping in
   List.fold_left (fun acc (k, v) -> Hashtbl.replace acc k v; acc) (Hashtbl.create 7) elts
 
-let print_if (clunky_mapping: (char list * char list) list) prog =
+let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_definition) option)) list) : (string, (string * Ctypes.composite_definition) option) Hashtbl.t =
+  let elts = List.map (fun (k, opt_v) ->
+    let k_str = String.of_seq (List.to_seq k) in
+    let v_opt = match opt_v with
+      | None -> None
+      | Some (v_list, dfn) ->
+        let v_str = String.of_seq (List.to_seq v_list) in
+        Some (v_str, dfn)
+    in
+    (k_str, v_opt)
+  ) mapping in
+  let tbl = Hashtbl.create 7 in
+  List.iter (fun (k, v_opt) -> Hashtbl.add tbl k v_opt) elts;
+  tbl
+
+
+let print_if
+    (clunky_sym_mapping: (char list * char list) list)
+    (clunky_composite_mapping: (char list * ((char list * Ctypes.composite_definition) option)) list)
+    (clunky_mod_name: char list)
+    prog =
   match !destination with
   | None -> ()
     (* printf "%s" "Camels\n"; *)
   | Some f ->
-    let mapping = fix_mapping_types clunky_mapping in
+    let sym_mapping = fix_mapping_types clunky_sym_mapping in
+    let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
+    let mod_name = List.to_seq clunky_mod_name |> String.of_seq in
+    printf "\nUUID mod_name %s\n" mod_name;
     (* let len_mapping = Hashtbl.length mapping in *)
-    printf "UID hashtbl";
-    pretty_print_hashtbl mapping;
+    printf "UUID hashtbl";
+    pretty_print_hashtbl composite_mapping;
     change_directory "./rust_project/src/";
     let oc = open_out f in
-    print_program mapping (formatter_of_out_channel oc) prog;
+    print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog;
     close_out oc;
     change_directory "../..";

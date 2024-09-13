@@ -581,6 +581,7 @@ let name_for_string_literal s =
     Hashtbl.find stringTable s
   with Not_found ->
     incr stringNum;
+    Format.printf "ASDF incrementing string from to %d + 1\n" !stringNum;
     let name = Printf.sprintf "__stringlit_%d" !stringNum in
     let id = intern_string name in
     let mergeable = if is_C_string s then 1 else 0 in
@@ -1490,7 +1491,7 @@ let debug_set_struct_ofs env typs =
 
 let convertProgram p =
   Diagnostics.reset();
-  stringNum := 0;
+  (* stringNum := 0; *)
   Hashtbl.clear decl_atom;
   Hashtbl.clear stringTable;
   Hashtbl.clear wstringTable;
