@@ -89,6 +89,7 @@ let print_primitive_init fmt = function
 
 let print_globvar fmt id v =
   let name_bare = extern_atom id in
+  let linkage = if C2C.atom_is_static id then "" else "pub " in
   (* TODO deal with extern. Can't just assume it's const or static *)
 
   (* need to do static analysis pass to conclude that this is actually static mut *)
@@ -96,7 +97,7 @@ let print_globvar fmt id v =
   (* in c, const int a = 5; void f(){ *(&a) = 6; } works just fine*)
 
   (* TODO if static in C, should become `pub` here *)
-  let name = "static mut "^name_bare in
+  let name = linkage^"static mut "^name_bare in
   match v.gvar_init with
   (* no data, declared somewhere else *)
   | [] -> ()
@@ -478,3 +479,6 @@ let print_if
     print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog;
     close_out oc;
     change_directory "../..";
+
+(* TODOS undo the c2c hack *)
+(* can just use c2c.atom_is_static + pub qualifier  *)
