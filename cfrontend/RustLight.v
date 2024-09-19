@@ -60,6 +60,7 @@ Print composite.
 
 
 
+(* TODO initially I wasn't sure if this would change, but I think it's fair to say it's the same as Clight types*)
 (* most of these types are just glibc types *)
 Inductive rexpr : Type :=
   | Econst_int: int -> type  -> rexpr
@@ -76,6 +77,24 @@ Inductive rexpr : Type :=
   | Efield: rexpr -> ident -> type  -> rexpr
   | Esizeof: type -> type  -> rexpr
   | Ealignof: type -> type  -> rexpr.
+
+Definition r_typeof (e: rexpr) : type :=
+  match e with
+  | Econst_int _ ty => ty
+  | Econst_float _ ty => ty
+  | Econst_single _ ty => ty
+  | Econst_long _ ty => ty
+  | Evar _ ty => ty
+  | Etempvar _ ty => ty
+  | Ederef _ ty => ty
+  | Eaddrof _ ty => ty
+  | Eunop _ _ ty => ty
+  | Ebinop _ _ _ ty => ty
+  | Ecast _ ty => ty
+  | Efield _ _ ty => ty
+  | Esizeof _ ty => ty
+  | Ealignof _ ty => ty
+  end.
 
 Locate unary_operation.
 

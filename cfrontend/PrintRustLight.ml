@@ -4,6 +4,67 @@ open AST
 open Camlcoq (*for extern_atom*)
 open RustLight
 
+(* open TODOs: *)
+(* - casting *)
+(* - precedence *)
+(* - glibc types *)
+(* - struct attributes *)
+(* - temp vars as "registers" *)
+(* - not always lifting immutable variables to global scope *)
+(* - improve janky identifier for explicit lifetimes and gotos *)
+(* - enum test *)
+(* - move tests to their own directory *)
+(* - relooper  *)
+
+(* TODO already exists in rustlight.v. How do I make it exportable *)
+let type_of_expr e =
+  match e with
+  | Econst_int(_, ty) -> ty
+  | Econst_float(_, ty) -> ty
+  | Econst_single(_, ty) -> ty
+  | Econst_long(_, ty) -> ty
+  | Evar(_, ty) -> ty
+  | Etempvar(_, ty) -> ty
+  | Ederef(_, ty) -> ty
+  | Eaddrof(_, ty) -> ty
+  | Eunop(_, _, ty) -> ty
+  | Ebinop(_, _, _, ty) -> ty
+  | Ecast(_, ty) -> ty
+  | Efield(_, _, ty) -> ty
+  | Esizeof(_, ty) -> ty
+  | Ealignof(_, ty) -> ty
+
+let is_composite ty =
+  match ty with
+  | Ctypes.Tvoid -> false
+  | Ctypes.Tint(_sz, _sg, _a) -> false
+    (* TODO ignoring the attributes for now. The volatile should be handled a layer up probably. Same for align? Either way going for the easy thing *)
+    (* TODO deal with visibility modifier *)
+  | Ctypes.Tarray(_ity, _num_ele, _attrs) -> true
+  | Ctypes.Tstruct(_id, _attr) -> true
+  | Ctypes.Tunion(_id, _attr) -> true
+  | Ctypes.Tfloat(_sz, _a) -> false
+  | Ctypes.Tlong(_sz, _a) -> false
+  | Ctypes.Tpointer(_ty, _a) -> false
+  (* function type*)
+  | Ctypes.Tfunction(_tylist, _ty, _cc) -> true
+
+(* let get_ty_of_expr expr = *)
+(*   match expr with *)
+(*   | Econst_int(_, ty) -> ty *)
+(*   | Econst_float(_, ty) -> ty *)
+(*   | Econst_single(_, ty) -> ty *)
+(*   | Econst_long(_, ty) -> ty *)
+(*   | Evar(_, ty) -> ty *)
+(*   | Etempvar(_, ty) -> ty *)
+(*   | Ederef(_, ty) -> ty *)
+(*   | Eaddrof(_, ty) -> ty *)
+(*   | Eunop(_, _, ty) -> ty *)
+(*   | Ebinop(_, _, _, ty) -> ty *)
+(*   | Ecast(_, ty) -> ty *)
+(*   | Efield(_, _, ty) -> ty *)
+(*   | Esizeof(_, _) -> () *)
+(*   | Ealignof(_, _) -> () *)
 
 
 let pretty_print_hashtbl tbl =
@@ -14,14 +75,6 @@ let pretty_print_hashtbl tbl =
       | None -> Format.printf "UUID  %s -> None @,\n" key
   ) tbl;
   Format.printf "UUID}@."
-
-(*open Camlcoq
-open PrintAST
-open Ctypes
-open Cop
-open PrintCsyntax
-open Clight*)
-(* open RustLight *)
 
 let temp_name (id: AST.ident) =
   try
@@ -52,6 +105,11 @@ let name_longtype_rust sz =
   | Signed -> "libc::c_longlong"
   | Unsigned -> "libc::c_ulonglong"
 
+let rec map_tylist_to_list tylist =
+  match tylist with
+  | Tnil -> []
+  | Tcons(ty, tyl) -> ty :: (map_tylist_to_list tyl)
+
 let rec gen_ty_rust ty =
   match ty with
   | Ctypes.Tvoid -> "libc::c_void"
@@ -66,10 +124,23 @@ let rec gen_ty_rust ty =
   | Ctypes.Tunion(id, attr) -> (extern_atom id)
   | Ctypes.Tfloat(sz, a) -> name_floattype_rust sz
   | Ctypes.Tlong(sz, a) -> name_longtype_rust sz
+  (* raw pointer only right now *)
+  (* TODO handle the attributes on a type *)
   | Ctypes.Tpointer(ty, _a) -> sprintf "*mut %s" (gen_ty_rust ty)
-  | _ -> "unimplemented!"
+  (* function pointers *)
+  | Ctypes.Tfunction(tylist, ty, cc) ->
+      let r_arglist = List.map gen_ty_rust (map_tylist_to_list tylist) |> String.concat "," in
+      (* TODO this makes for nicer code, but should we be mappign to c_void or unit everywhere? *)
+      let rust_ret_ty = if ty == Ctypes.Tvoid then "()" else (gen_ty_rust ty) in
+      sprintf "(fn(%s) -> %s)" r_arglist rust_ret_ty
 
 (* TODO control-flow precedence *)
+
+let map_to_unsigned =
+  function
+  | Ctypes.Tarray(Ctypes.Tint(I8, _, attrs), num_ele, a) ->
+    Ctypes.Tarray(Ctypes.Tint(I8, Unsigned, attrs), num_ele, a)
+  | ty -> Format.printf "AID error! something besides expected type for %s\n" (gen_ty_rust ty); ty
 
 let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust ty)
 
@@ -81,41 +152,76 @@ let print_primitive_init fmt = function
   | Init_float32 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_float64 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_space n -> fprintf fmt "/* skip %s */@ " (Z.to_string n)
-  | Init_addrof(symb, ofs) -> () (* TODO *)
+  | Init_addrof(symb, ofs) -> fprintf fmt "UNIMPLEMENTED!" (* TODO *)
       (* let ofs = camlint_of_coqint ofs in *)
       (* if ofs = 0l *)
       (* then fprintf p "&%s" (extern_atom symb) *)
       (* else fprintf p "(void *\)((char *\)&%s + %ld)" (extern_atom symb) ofs *)
 
+let re_string_literal = Str.regexp "__stringlit_[0-9]+"
+
+let print_composite_init fmt arr =
+  fprintf fmt "[@ ";
+  List.iter
+    (
+      fun i ->
+        print_primitive_init fmt i;
+        match i with
+        | Init_space _ -> ()
+        | _ -> fprintf fmt ",@ "
+    ) arr;
+  fprintf fmt "]"
+
+let string_of_init id =
+  let b = Buffer.create (List.length id) in
+  let add_init = function
+  | Init_int8 n ->
+      let c = Int32.to_int (camlint_of_coqint n) in
+      if c >= 32 && c <= 126 && c <> Char.code '\"' && c <> Char.code '\\'
+      then Buffer.add_char b (Char.chr c)
+      else
+        if Char.code '\000' == c then Buffer.add_string b "\\0"
+        else if Char.code '\n' == c then Buffer.add_string b "\\n"
+  | _ ->
+      assert false
+  in List.iter add_init id; Buffer.contents b
+
 let print_globvar fmt id v =
   let name_bare = extern_atom id in
   let linkage = if C2C.atom_is_static id then "" else "pub " in
-  (* TODO deal with extern. Can't just assume it's const or static *)
-
   (* need to do static analysis pass to conclude that this is actually static mut *)
   (* in rust, const a : u32 = 5; ensure (with the compiler) that a is not writable. Ever *)
   (* in c, const int a = 5; void f(){ *(&a) = 6; } works just fine*)
+  (* TODO not sure if this is, however, UB *)
 
   (* TODO if static in C, should become `pub` here *)
   let name = linkage^"static mut "^name_bare in
   match v.gvar_init with
-  (* no data, declared somewhere else *)
+  (* in C this would be extern variablename; *)
+  (* in Rust, we have a separate function that does imports *)
+  (* so this is a noop *)
   | [] -> ()
-    (* morally speaking, want a use statement *)
-    (* we DONT need to redeclare it *)
-    (* this means we need to track the crates (and generate a lib.rs) *)
-    (* not there yet, however. *)
-    (* so, do nothing. *)
-    (* fprintf fmt "extern %s; @ @ " name; *)
   | [Init_space _] ->
-    (* TODO pretty sure this is not right  *)
     fprintf fmt "%s; @ @ " (gen_name_and_ty_rust name v.gvar_info)
   | _ ->
-    fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name v.gvar_info);
     begin match v.gvar_info, v.gvar_init with
       | (Ctypes.Tint _ | Ctypes.Tlong _ | Ctypes.Tfloat _ | Tpointer _ | Tfunction _),
-        [i1] -> print_primitive_init fmt i1
-      | _, il -> () (* TODO this for string support  *)
+        [i1] ->
+          fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name v.gvar_info);
+          print_primitive_init fmt i1
+      | _, il ->
+          if Str.string_match re_string_literal (extern_atom id) 0
+          && List.for_all (function Init_int8 _ -> true | _ -> false) il
+          then
+            (
+              fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name (map_to_unsigned v.gvar_info));
+              fprintf fmt "b\"%s\"" (string_of_init (il))
+            )
+          else
+            (
+              fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name v.gvar_info);
+              print_composite_init fmt il
+            )
     end;
   fprintf fmt ";@]@ @ "
 
@@ -184,11 +290,24 @@ let rec print_expr fmt e =
   (* TODO broken for globals. Need to special case that. *)
   | RustLight.Eaddrof (exp, _) ->
     fprintf fmt "(std::ptr::addr_of_mut!(%a))" print_expr exp
-  | RustLight.Ecast (expr, ty) ->
+  (* we know that we  *)
+  | RustLight.Ecast(exp, ty) -> (
+    let e_ty = type_of_expr exp in
+    let e_ty_is_composite = is_composite e_ty in
+    let to_ty_is_composite = is_composite ty in
+
+    (* may only cast between scalar types  *)
+    match (e_ty_is_composite, to_ty_is_composite) with
+    | (false, false) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust ty)
+    | (b1, b2) -> printf "AID FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2
+
+
+
     (* somewhat complicated because we might want to use *)
     (* `as` on pointers *)
     (* or https://doc.rust-lang.org/std/mem/fn.transmute.html *)
-    fprintf fmt "TODO casts are unimplemented"
+    (* fprintf fmt "TODO casts are unimplemented" *)
+    )
   | RustLight.Esizeof (ty, ty') ->
     fprintf fmt "(std::mem::sizeof::<%s>() as %s)" (gen_ty_rust ty) (gen_ty_rust ty')
   | RustLight.Ealignof (ty, ty') ->
@@ -265,32 +384,29 @@ and print_cases fmt cases =
       fprintf fmt "@[<v 2>%s => {@;%a@;<0 -2>}@]@;" (Z.to_string n) print_stmt body;
       print_cases fmt stmts
 
-(* fn name(param: ty, ) -> { body  }*)
+(* fn name(param: ty, ) -> { body  } *)
 let print_function fmt id fn =
   let fn_name = (extern_atom id) in
   let fn_params = fn.fn_params in
   let fn_linkage = if C2C.atom_is_static id then "" else "pub " in
-  let fn_args = List.fold_left (fun acc (tid, tty) -> acc ^ (gen_name_and_ty_rust (extern_atom tid) tty) ^ ", ") ("") fn_params in
-  (* let params = name_function_parameters extern_atom (extern_atom id) f.fn_params f.fn_callconv in *)
-  (* TODO deal with visibility modifier *)
+  let fn_args =
+    fn_params
+    |> List.map (fun (tid, tty) -> gen_name_and_ty_rust (extern_atom tid) tty)
+    |> String.concat ", "
+  in
+
   fprintf fmt "#[no_mangle]@ %sunsafe extern \"C\" fn %s(%s) -> %s" fn_linkage fn_name fn_args (gen_ty_rust fn.fn_return);
   fprintf fmt "@ @[<v 2>{@ ";
-  (* TODO find an example that uses this *)
   List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (extern_atom vid) vty) ) fn.fn_vars;
-
-  (* TODO find an example that uses this *)
   List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (temp_name vid) vty) ) fn.fn_temps;
 
   print_stmt fmt fn.fn_body;
 
-  (* print statements + vars *)
   fprintf fmt "@;<0 -2>}@]@ @ "
 
 let print_fundef fmt id fundef =
   match fundef with
   | Ctypes.Internal f -> print_function fmt id f
-  (* don't need extern to be printed. However, do need use*)
-  (* TODO print use keyword here *)
   | Ctypes.External(_, _, _, _) ->  fprintf fmt ""
 
 
@@ -468,7 +584,6 @@ let print_if
     prog =
   match !destination with
   | None -> ()
-    (* printf "%s" "Camels\n"; *)
   | Some f ->
     let sym_mapping = fix_mapping_types clunky_sym_mapping in
     let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
@@ -478,9 +593,9 @@ let print_if
     printf "UUID hashtbl";
     pretty_print_hashtbl composite_mapping;
     change_directory "./rust_project/src/";
+    printf "DOIN opening out: %s\n" f;
     let oc = open_out f in
+    printf "DOING success opening out\n";
     print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog;
     close_out oc;
     change_directory "../..";
-
-(* TODOS undo the c2c hack *)
