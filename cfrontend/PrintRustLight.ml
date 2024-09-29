@@ -5,16 +5,21 @@ open Camlcoq (*for extern_atom*)
 open RustLight
 
 (* open TODOs: *)
+(* - array dereference. *)
+(*   Need to think about binop and unop on array types. *)
+(*    As soon as they're treated as pointers, *)
+(*    they need to be converted into pointers which is problematic *)
 (* - casting *)
 (* - precedence *)
-(* - glibc types *)
 (* - struct attributes *)
 (* - temp vars as "registers" *)
 (* - not always lifting immutable variables to global scope *)
 (* - improve janky identifier for explicit lifetimes and gotos *)
-(* - enum test *)
-(* - move tests to their own directory *)
+(* - glibc types should be special cased in a better way. Pass in headerfile information/add headerfile information to map *)
+(* - enum test, somehow deal with stripped enum information *)
 (* - relooper  *)
+
+(* let is_ptr *)
 
 (* TODO already exists in rustlight.v. How do I make it exportable *)
 let type_of_expr e =
@@ -92,7 +97,7 @@ let name_inttype_rust sz sg =
   | I16, Unsigned -> "libc::c_ushort"
   | I32, Signed -> "libc::c_int"
   | I32, Unsigned -> "libc::c_uint"
-  (* using bool here, unsure of correctness since libc doesn't have _Bool *)
+  (* using bool here, libc doesn't have _Bool so use primitive instead*)
   | IBool, _ -> "bool"
 
 let name_floattype_rust sz =
@@ -134,8 +139,6 @@ let rec gen_ty_rust ty =
       let rust_ret_ty = if ty == Ctypes.Tvoid then "()" else (gen_ty_rust ty) in
       sprintf "(fn(%s) -> %s)" r_arglist rust_ret_ty
 
-(* TODO control-flow precedence *)
-
 let map_to_unsigned =
   function
   | Ctypes.Tarray(Ctypes.Tint(I8, _, attrs), num_ele, a) ->
@@ -152,11 +155,11 @@ let print_primitive_init fmt = function
   | Init_float32 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_float64 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_space n -> fprintf fmt "/* skip %s */@ " (Z.to_string n)
+  (* this is hard because in the case of globals, the addr_of!  does not work. *)
+  (* TODO *)
+  (* - try with rust nightly and the new pointer type *)
+  (* - copy c2rust *)
   | Init_addrof(symb, ofs) -> fprintf fmt "UNIMPLEMENTED!" (* TODO *)
-      (* let ofs = camlint_of_coqint ofs in *)
-      (* if ofs = 0l *)
-      (* then fprintf p "&%s" (extern_atom symb) *)
-      (* else fprintf p "(void *\)((char *\)&%s + %ld)" (extern_atom symb) ofs *)
 
 let re_string_literal = Str.regexp "__stringlit_[0-9]+"
 
@@ -194,9 +197,9 @@ let print_globvar fmt id v =
   (* in c, const int a = 5; void f(){ *(&a) = 6; } works just fine*)
   (* TODO not sure if this is, however, UB *)
 
-  (* TODO if static in C, should become `pub` here *)
   let name = linkage^"static mut "^name_bare in
   match v.gvar_init with
+
   (* in C this would be extern variablename; *)
   (* in Rust, we have a separate function that does imports *)
   (* so this is a noop *)
@@ -215,7 +218,8 @@ let print_globvar fmt id v =
           then
             (
               fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name (map_to_unsigned v.gvar_info));
-              fprintf fmt "b\"%s\"" (string_of_init (il))
+              (* dereference here because string literals are pointers to byte arrays  *)
+              fprintf fmt "*b\"%s\"" (string_of_init (il))
             )
           else
             (
@@ -236,7 +240,6 @@ let rec print_expr fmt e =
     | 1l -> "true"
     | _ -> "ERROR bool is outside {0, 1}"
     end
-  (* TODO fix type issue*)
   | Econst_int(n, ty) ->
     fprintf fmt "(%ld as %s)" (camlint_of_coqint n) (gen_ty_rust ty)
   | Econst_float(f, ty) ->
@@ -247,7 +250,7 @@ let rec print_expr fmt e =
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
     fprintf fmt "%LdLL" (camlint64_of_coqint n)
-  | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id)
+  | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id) (* (_ty ==) *)
   | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
   | RustLight.Eunop (op_ty, exp, _ty) ->
     (
@@ -286,7 +289,23 @@ let rec print_expr fmt e =
       fprintf fmt "(%a %s %a)" print_expr e1 op_name print_expr e2
     )
   | RustLight.Efield (exp, id, ty) -> fprintf fmt "%a.%s" print_expr exp (extern_atom id)
-  | RustLight.Ederef (exp, _ty) -> fprintf fmt "(*%a)" print_expr exp
+  | RustLight.Ederef (exp, _ty (* type we derefernce into *)) -> (
+    (* type we were before dereferencing *)
+    let exp_ty = type_of_expr exp in
+    match exp_ty with
+    (* edge case for this because now this is dependent on what ty is *)
+    | Tpointer(_, _) -> fprintf fmt "(*DEREF%a)" print_expr exp
+    (* TODO is this needed? *)
+    | Tarray(_, _, _) -> fprintf fmt "(%a)[0]" print_expr exp
+    | _ -> fprintf fmt "unimplemented deref for this type"
+
+  )
+
+
+
+  (* get type of exp. If it's an array, use array dereference syntax.*)
+
+
   (* TODO broken for globals. Need to special case that. *)
   | RustLight.Eaddrof (exp, _) ->
     fprintf fmt "(std::ptr::addr_of_mut!(%a))" print_expr exp
@@ -300,8 +319,6 @@ let rec print_expr fmt e =
     match (e_ty_is_composite, to_ty_is_composite) with
     | (false, false) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust ty)
     | (b1, b2) -> printf "AID FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2
-
-
 
     (* somewhat complicated because we might want to use *)
     (* `as` on pointers *)
@@ -444,7 +461,21 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
        let name = extern_atom id in
        let maybe_module = Hashtbl.find_opt mapping name in
        match maybe_module with
-       | None -> printf "UID couldn't find module for symbol %s in mapping\n" name; acc
+       (* TODO this is the exact line where we can insert libc symbols. It would be good to know what those symbols are, though. *)
+       (* for now, just auto libc it *)
+       | None -> (
+           printf "UID couldn't find module for symbol %s in mapping. Assuming libc\n" name;
+           let maybe_hs = Hashtbl.find_opt acc "libc" in
+           match maybe_hs with
+           | None ->
+             let new_hs = StringSet.singleton name in
+             Hashtbl.replace acc "libc" new_hs;
+             acc
+           | Some hs ->
+             let new_hs = StringSet.add name hs in
+             Hashtbl.replace acc "libc" new_hs;
+             acc
+         )
        | Some module_ ->
          let maybe_hs = Hashtbl.find_opt acc module_ in
          match maybe_hs with

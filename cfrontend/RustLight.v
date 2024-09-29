@@ -60,8 +60,6 @@ Print composite.
 
 
 
-(* TODO initially I wasn't sure if this would change, but I think it's fair to say it's the same as Clight types*)
-(* most of these types are just glibc types *)
 Inductive rexpr : Type :=
   | Econst_int: int -> type  -> rexpr
   | Econst_float: float -> type  -> rexpr

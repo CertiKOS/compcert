@@ -176,6 +176,7 @@ let process_c_file sourcename =
       output_filename sourcename ~suffix:".i"
     else
       tmp_file ".i" in
+
     preprocess sourcename preproname;
     compile_i_file sourcename preproname
   end
@@ -565,6 +566,7 @@ edition = "2021"
 libc = "0.2.158"
 
 [[bin]]
+name = "main"
 path = "./src/|} ^ (Hashtbl.find !sym_mapping "main") ^ ".rs\"" in
   output_string oc content;      (* Write the string to the file *)
   close_out oc
