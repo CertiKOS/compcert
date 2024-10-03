@@ -108,6 +108,8 @@ Definition check_attr(ty: Ctypes.attr) : res (unit) :=
 
 Print Ctypes.type.
 
+(* checks if the type is supported. *)
+(* we dont' support volatile right now *)
 Fixpoint check_ty (ty: Ctypes.type) : res (unit) :=
   match ty with
   | Ctypes.Tvoid => OK(tt)
@@ -196,6 +198,8 @@ Record s_md : Type :=
       cur_loop_lbl: option Z;
       cur_switch_lbl: option Z;
       next_lbl: option Z;
+      (* return type of the function *)
+      f_rty: type;
     }.
 
 Print ce.
@@ -217,7 +221,8 @@ Inductive rstatement: Type :=
   | S_loop: option Z -> rstatement -> rstatement -> rstatement
   | S_break : option Z -> rstatement
   | S_continue : option Z -> rstatement
-  | S_return : option rexpr -> rstatement
+  (* maybe (expression expected type of expression) -> stmt *)
+  | S_return : option (rexpr * type) -> rstatement
   (* match statements are very limited in scope *)
   (* we only match on ints *)
   (* and we assign to nothing *)
@@ -242,6 +247,36 @@ Fixpoint transl_arglist
   end
 .
 
+Definition gen_cast_for_conditional
+  (expr: rexpr)
+  : rexpr
+  :=
+  let ty := r_typeof expr in
+  match ty with
+  (* TODo *)
+  | Ctypes.Tint Ctypes.IBool _ _ => expr
+  | Ctypes.Tint _ _ attrs  =>
+      Ebinop Ogt expr (Econst_int (Int.repr 0) ty) (Ctypes.Tint IBool Unsigned attrs)
+  | _ => expr
+  end.
+
+(* I think this can generalize *)
+Definition gen_cast_for_return
+  (cur_type: type)
+  (desired_type: type)
+  (expr: rexpr)
+  : rexpr
+  :=
+  match (cur_type, desired_type) with
+  (* integer 0 constant -> pointer type *)
+  (* TODO it would be good to check if the constant is actually evaluating to 0 here *)
+  | (Ctypes.Tint _  _  _ , Ctypes.Tpointer ty attr) => Ecast expr desired_type
+  | (Ctypes.Tlong _ _, Ctypes.Tpointer ty  attr) => Ecast expr desired_type
+  (* TODO it would be wrong here *)
+  | (Ctypes.Tpointer (Ctypes.Tvoid) _, Ctypes.Tpointer _ _) => Ecast expr desired_type
+  | (_, _) => expr
+  end.
+
 Fixpoint transl_statement
   (md : s_md)
   (s: Clight.statement) {struct s}
@@ -255,6 +290,7 @@ Fixpoint transl_statement
       cur_loop_lbl := cur_loop_lbl;
       cur_switch_lbl := cur_switch_lbl;
       next_lbl := next_lbl;
+      f_rty := f_rty;
     |} =>
     match s with
     | Clight.Sskip => SimplExpr.ret (S_skip)
@@ -265,10 +301,11 @@ Fixpoint transl_statement
           OK(S_assign r_lval r_rval);
         SimplExpr.ret r_val
     | Clight.Sifthenelse exp s1 s2 =>
-        gdom r_exp <- transl_expr ce exp;
+        gdom cond <- transl_expr ce exp;
+        let casted_cond := gen_cast_for_conditional cond in
         gdo r_s1 <- transl_statement md s1;
         gdo r_s2 <- transl_statement md s2;
-        SimplExpr.ret (S_if_then_else r_exp r_s1 r_s2)
+        SimplExpr.ret (S_if_then_else casted_cond r_s1 r_s2)
     | Clight.Sset x exp =>
         gdom r_exp <- transl_expr ce exp;
         SimplExpr.ret (S_set x r_exp)
@@ -278,8 +315,9 @@ Fixpoint transl_statement
         SimplExpr.ret (S_sequence r_exp1 r_exp2)
     | Clight.Sreturn None => SimplExpr.ret (S_return None)
     | Clight.Sreturn (Some exp) =>
+        let exp_ty := Clight.typeof exp in
         gdom r_exp <- transl_expr ce exp;
-        SimplExpr.ret (S_return (Some r_exp))
+        SimplExpr.ret (S_return (Some (gen_cast_for_return exp_ty f_rty r_exp, exp_ty)))
     | Clight.Sswitch exp stmts =>
       let exp_typ := Clight.typeof exp in
       let dflt_case_ty := Ctypes.Tint IBool Signed noattr in
@@ -316,6 +354,7 @@ Fixpoint transl_statement
           cur_loop_lbl := cur_loop_lbl;
           cur_switch_lbl := switch_loop_lbl;
           next_lbl := switch_loop_lbl;
+          f_rty := f_rty;
         |} in
 
       gdo (dflt_case_inner_stmt, labeled_match_stmts) <-
@@ -350,6 +389,7 @@ Fixpoint transl_statement
             cur_loop_lbl := loop_lbl;
             cur_switch_lbl := loop_lbl;
             next_lbl := loop_lbl;
+            f_rty := f_rty;
           |} in
         gdo r_s1 <- transl_statement u_s_md s1;
         gdo r_s2 <- transl_statement u_s_md s2;
@@ -614,7 +654,7 @@ Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement
   | S_break _int => PTree.empty _
   | S_return maybe_rexpr =>
       match maybe_rexpr with
-      | Some rexpr => (walk_r_expr rexpr)
+      | Some (rexpr, _ty) => (walk_r_expr rexpr)
       | None => PTree.empty _
       end
   (* TODO think about shadowing. Might need to ensure there's no other variable, but can easily do this with function metadata *)
@@ -647,6 +687,7 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
               cur_loop_lbl := None;
               cur_switch_lbl := None;
               next_lbl := None;
+              f_rty := return_type;
             |} in
   let body := transl_statement smd (Clight.fn_body f) generator in
   match body with

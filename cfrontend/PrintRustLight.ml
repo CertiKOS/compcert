@@ -5,6 +5,16 @@ open Camlcoq (*for extern_atom*)
 open RustLight
 
 (* open TODOs: *)
+(* - IMPLICIT CONVERSIONS !*)
+(*   - assignment void* to any pointer type  *)
+(*   - promotions in binop *)
+(*   - 0 to any pointer type in any expr or return  *)
+(*   - if statements  *)
+(*     - ptr  *)
+(*     - unop or binop  *)
+(*   - assignment coersions will require a cast *)
+
+(* structs are not correct because they might be differently defined under the same name in different file. I think I need to store a rep of the struct in my hashmap. However, construct counter example first. *)
 (* - array dereference. *)
 (*   Need to think about binop and unop on array types. *)
 (*    As soon as they're treated as pointers, *)
@@ -53,24 +63,6 @@ let is_composite ty =
   | Ctypes.Tpointer(_ty, _a) -> false
   (* function type*)
   | Ctypes.Tfunction(_tylist, _ty, _cc) -> true
-
-(* let get_ty_of_expr expr = *)
-(*   match expr with *)
-(*   | Econst_int(_, ty) -> ty *)
-(*   | Econst_float(_, ty) -> ty *)
-(*   | Econst_single(_, ty) -> ty *)
-(*   | Econst_long(_, ty) -> ty *)
-(*   | Evar(_, ty) -> ty *)
-(*   | Etempvar(_, ty) -> ty *)
-(*   | Ederef(_, ty) -> ty *)
-(*   | Eaddrof(_, ty) -> ty *)
-(*   | Eunop(_, _, ty) -> ty *)
-(*   | Ebinop(_, _, _, ty) -> ty *)
-(*   | Ecast(_, ty) -> ty *)
-(*   | Efield(_, _, ty) -> ty *)
-(*   | Esizeof(_, _) -> () *)
-(*   | Ealignof(_, _) -> () *)
-
 
 let pretty_print_hashtbl tbl =
   Format.printf "UUID {@.";
@@ -136,6 +128,7 @@ let rec gen_ty_rust ty =
   | Ctypes.Tfunction(tylist, ty, cc) ->
       let r_arglist = List.map gen_ty_rust (map_tylist_to_list tylist) |> String.concat "," in
       (* TODO this makes for nicer code, but should we be mappign to c_void or unit everywhere? *)
+      (* cvoid should only appear in function signatures by itself *)
       let rust_ret_ty = if ty == Ctypes.Tvoid then "()" else (gen_ty_rust ty) in
       sprintf "(fn(%s) -> %s)" r_arglist rust_ret_ty
 
@@ -143,7 +136,7 @@ let map_to_unsigned =
   function
   | Ctypes.Tarray(Ctypes.Tint(I8, _, attrs), num_ele, a) ->
     Ctypes.Tarray(Ctypes.Tint(I8, Unsigned, attrs), num_ele, a)
-  | ty -> Format.printf "AID error! something besides expected type for %s\n" (gen_ty_rust ty); ty
+  | ty -> Format.printf "error! something besides expected type for %s\n" (gen_ty_rust ty); ty
 
 let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust ty)
 
@@ -232,7 +225,7 @@ let print_globvar fmt id v =
 let rec print_expr fmt e =
   match e with
   | Econst_int(n, Ctypes.Tint(I32, Unsigned, _)) ->
-    fprintf fmt "%luU" (camlint_of_coqint n)
+    fprintf fmt "(%lu as libc::c_uint)" (camlint_of_coqint n)
   | Econst_int(n, Ctypes.Tint(IBool, _, _)) ->
     fprintf fmt "%s"
     begin match (camlint_of_coqint n) with
@@ -252,17 +245,19 @@ let rec print_expr fmt e =
     fprintf fmt "%LdLL" (camlint64_of_coqint n)
   | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id) (* (_ty ==) *)
   | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
-  | RustLight.Eunop (op_ty, exp, _ty) ->
+  | RustLight.Eunop (op_ty, exp, ty) ->
     (
       let op_name =
       begin match op_ty with
+      (* conversion to bool *)
       | Cop.Onotbool -> "!"
+      (* bitwise not is ! in rust *)
       | Cop.Onotint -> "!"
       | Cop.Oneg -> "-"
       | Cop.Oabsfloat -> "UNSUPPORTED OP"
       end
       in
-      fprintf fmt "%s%a" op_name print_expr exp;
+      fprintf fmt "((%s%a) as %s)" op_name print_expr exp (gen_ty_rust ty);
     )
   | RustLight.Ebinop (op_type, e1, e2, ty) ->
     (
@@ -294,7 +289,7 @@ let rec print_expr fmt e =
     let exp_ty = type_of_expr exp in
     match exp_ty with
     (* edge case for this because now this is dependent on what ty is *)
-    | Tpointer(_, _) -> fprintf fmt "(*DEREF%a)" print_expr exp
+    | Tpointer(_, _) -> fprintf fmt "(*%a)" print_expr exp
     (* TODO is this needed? *)
     | Tarray(_, _, _) -> fprintf fmt "(%a)[0]" print_expr exp
     | _ -> fprintf fmt "unimplemented deref for this type"
@@ -317,8 +312,8 @@ let rec print_expr fmt e =
 
     (* may only cast between scalar types  *)
     match (e_ty_is_composite, to_ty_is_composite) with
-    | (false, false) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust ty)
-    | (b1, b2) -> printf "AID FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2
+    | (false, false) -> fprintf fmt "(%a as %s (%s, %s))" print_expr exp (gen_ty_rust ty) (gen_ty_rust e_ty) (gen_ty_rust ty)
+    | (b1, b2) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2
 
     (* somewhat complicated because we might want to use *)
     (* `as` on pointers *)
@@ -344,7 +339,7 @@ let rec print_stmt fmt body =
   | S_skip -> fprintf fmt "/* skip stmt */@;";
   | S_assign(e1, e2) -> fprintf fmt "@[<hv 2>%a =@ %a;@]" print_expr e1 print_expr e2;
   | S_set(id, e) -> fprintf fmt "@[<hv 2>%s =@ %a;@]" (temp_name id) print_expr e;
-  | S_return(Some exp) -> fprintf fmt "return %a;" print_expr exp
+  | S_return(Some (exp, ty)) -> fprintf fmt "return %a;" print_expr exp
   | S_return(None) -> fprintf fmt "return;"
   | S_sequence(RustLight.S_skip, s2) -> print_stmt fmt s2
   | S_sequence(s1, RustLight.S_skip) -> print_stmt fmt s1
