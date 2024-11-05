@@ -25,6 +25,8 @@
           packages.compcerto = pkgs.coqPackages_8_12.compcerto;
           packages.devshell = self.devShell.${system};
           devShell = pkgs.mkShell.override {} {
+          RUST_SRC_PATH = "${fenixStable}/lib/rustlib/src/rust/library";
+          RUST_LIB_SRC = "${fenixStable}/lib/rustlib/src/rust/library";
             # buildInputs = [pkgs.nixStable];
              buildInputs =
                with pkgs; [
@@ -68,6 +70,7 @@
                  just
                  typst
                  cvc4
+                 libiconv
                ];
           };
     });

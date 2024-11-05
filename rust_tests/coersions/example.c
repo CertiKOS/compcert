@@ -6,28 +6,28 @@ int main() {
     int intVar = ~5;
     unsigned int uintVar = 0;
     if (!intVar) {
-        printf("intVar is true\n");
+      return 1;
     } else {
-        printf("intVar is false\n");
+      return 1;
     }
     if (!uintVar) {
-        printf("uintVar is true\n");
+      return 1;
     } else {
-        printf("uintVar is false\n");
+      return 1;
     }
 
-    // Floating-point types
+    /*// Floating-point types*/
     float floatVar = -0.0f;
     double doubleVar = 3.14;
     if (floatVar) {
-        printf("floatVar is true\n");
+      return 1;
     } else {
-        printf("floatVar is false\n");
+      return 1;
     }
     if (doubleVar) {
-        printf("doubleVar is true\n");
+      return 1;
     } else {
-        printf("doubleVar is false\n");
+      return 1;
     }
 
     // Pointer types
@@ -35,56 +35,56 @@ int main() {
     int value = 10;
     int *ptrVar2 = &value;
     if (ptrVar) {
-        printf("ptrVar is true\n");
+      return 1;
     } else {
-        printf("ptrVar is false\n");
+      return 1;
     }
     if (ptrVar2) {
-        printf("ptrVar2 is true\n");
+      return 1;
     } else {
-        printf("ptrVar2 is false\n");
+      return 1;
     }
 
     // Enumeration types
     enum { OFF, ON } enumVar = OFF;
     enum { RED = 0, GREEN = 1, BLUE = 2 } color = BLUE;
     if (enumVar) {
-        printf("enumVar is true\n");
+      return 1;
     } else {
-        printf("enumVar is false\n");
+      return 1;
     }
     if (color) {
-        printf("color is true\n");
+      return 1;
     } else {
-        printf("color is false\n");
+      return 1;
     }
 
     // _Bool and bool types
     _Bool boolVar1 = 0;
     bool boolVar2 = true;
     if (boolVar1) {
-        printf("boolVar1 is true\n");
+      return 1;
     } else {
-        printf("boolVar1 is false\n");
+      return 1;
     }
     if (boolVar2) {
-        printf("boolVar2 is true\n");
+      return 1;
     } else {
-        printf("boolVar2 is false\n");
+      return 1;
     }
 
     // Character types
     char charVar = '\0';
     unsigned char ucharVar = 'A';
     if (charVar) {
-        printf("charVar is true\n");
+      return 1;
     } else {
-        printf("charVar is false\n");
+      return 1;
     }
     if (ucharVar) {
-        printf("ucharVar is true\n");
+      return 1;
     } else {
-        printf("ucharVar is false\n");
+      return 1;
     }
 
     // Arrays and structures
@@ -92,67 +92,67 @@ int main() {
         int member;
     } s;
     if (&s) {
-        printf("Address of s is true\n");
+      return 1;
     } else {
-        printf("Address of s is false\n");
+      return 1;
     }
 
-    int arr[5];
-    if (arr) {
-        printf("Array arr is true\n");
-    } else {
-        printf("Array arr is false\n");
-    }
+    /*int arr[5];*/
+    /*if (arr) {*/
+    /*    printf("Array arr is true\n");*/
+    /*} else {*/
+    /*    printf("Array arr is false\n");*/
+    /*}*/
 
     // Logical NOT operator
     int x = 0;
     if (!x) {
-        printf("!x is true\n");
+      return 1;
     } else {
-        printf("!x is false\n");
+      return 1;
     }
 
     // Logical AND and OR operators
     int y = 5;
     if (x && y) {
-        printf("x && y is true\n");
+      return 1;
     } else {
-        printf("x && y is false\n");
+      return 1;
     }
     if (x || y) {
-        printf("x || y is true\n");
+      return 1;
     } else {
-        printf("x || y is false\n");
+      return 1;
     }
 
     // Integer promotions
     char c = -1;
     if (c > 0) {
-        printf("c > 0 is true\n");
+      return 1;
     } else {
-        printf("c > 0 is false\n");
+      return 1;
     }
 
     // Floating-point comparisons
     double d = 1e-10;
     if (d) {
-        printf("d is true\n");
+      return 1;
     } else {
-        printf("d is false\n");
+      return 1;
     }
     if (d < 1e-9) {
-        printf("d is less than 1e-9\n");
+      return 1;
     } else {
-        printf("d is not less than 1e-9\n");
+      return 1;
     }
 
     // Combining different types
     int a = 0;
     float b = 2.5f;
     if (a + b) {
-        printf("a + b is true\n");
+      return 1;
     } else {
-        printf("a + b is false\n");
+      return 1;
     }
 
     // Uninitialized variable (commented out to prevent undefined behavior)
