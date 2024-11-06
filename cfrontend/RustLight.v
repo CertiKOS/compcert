@@ -210,6 +210,8 @@ Record r_function : Type := mkrfunction {
   (* the external symbols that are used*)
   (* we use this in printing exports*)
   fn_imports: PTree.t unit;
+
+  fn_is_safe: bool;
 }.
 
 
@@ -813,6 +815,7 @@ Definition empty_r_fn : r_function := {|
                                  fn_temps := nil;
                                  fn_body := S_skip;
                                  fn_imports := PTree.empty _;
+                                 fn_is_safe := false;
                                |}.
 
 
@@ -1018,6 +1021,7 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
                 fn_temps := r_g.(SimplExpr.gen_trail);
                 fn_body := r_body;
                 fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
+                fn_is_safe := false;
               |})
       end
   end.
@@ -1081,33 +1085,13 @@ Definition gen_new_main'
         Ctypes.Internal (
               mkrfunction
                 Ctypes.Tvoid
-                (* {| cc_structret := (AST.cc_structret (old_main_fn.(Clight.fn_callconv))); |} *)
-                (* empty_cc *)
-                ({| cc_structret := false; |})
+                {| cc_structret := (AST.cc_structret (old_main_fn.(Clight.fn_callconv))); |}
                 old_main_fn.(Clight.fn_params)
                 nil
                 (cons (exit_ident, exit_ty) nil)
                 (S_sequence s1 s2)
-                (* (S_exit *)
-                (*   ( *)
-                (*     cons ( *)
-                (*       (* TODO add exit call here, unclear how *) *)
-                (*       (* probably easiest to do this properly.*) *)
-                (*       (* that is, modify rexpr to include calls. .*) *)
-
-                (*       (* you can also definitely do the separating *)
-                (*          the inner expression out *)
-                (*          but that's a metric amount of annoying because you have *)
-                (*          to grab the generator for this *)
-                (*        *) *)
-                (*       S_call *)
-                (*       None *)
-                (*       (Evar old_main_ident (old_main_fn.(Clight.fn_return))) *)
-                (*       (map (fun x => Evar (fst x) (snd x)) old_main_fn.(Clight.fn_params)) *)
-                (*   ) *)
-                (*       nil) *)
-                (* ) *)
                 (PTree.empty _)
+                true
               )
 
         ))

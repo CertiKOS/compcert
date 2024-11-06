@@ -4,6 +4,14 @@ open AST
 open Camlcoq (*for extern_atom*)
 open RustLight
 
+(* HACK the proper solution is to add to this map in process_c *)
+let extern_atom_r a =
+  try
+    let res = Hashtbl.find string_of_atom a in
+    if res = "main" then "main_2" else res
+  with Not_found ->
+    "main"
+
 (* open TODOs: *)
 (* - IMPLICIT CONVERSIONS !*)
 (*   - assignment void* to any pointer type  *)
@@ -13,6 +21,12 @@ open RustLight
 (*     - ptr  *)
 (*     - unop or binop  *)
 (*   - assignment coersions will require a cast *)
+
+(* https://github.com/immunant/c2rust/issues/447 change linker portion to prefix libc with :: *)
+
+(* another large task: *)
+(* - redo rustlight IR to make it faithful to the rust grammar *)
+(* - a large portion of the statements must become expressions *)
 
 (* structs are not correct because they might be differently defined under the same name in different file. I think I need to store a rep of the struct in my hashmap. However, construct counter example first. *)
 (* - array dereference. *)
@@ -35,6 +49,7 @@ open RustLight
 let type_of_expr e =
   match e with
   | Econst_int(_, ty) -> ty
+  | Eif_then_else(_, _, _, ty) -> ty
   | Econst_float(_, ty) -> ty
   | Econst_single(_, ty) -> ty
   | Econst_long(_, ty) -> ty
@@ -48,6 +63,7 @@ let type_of_expr e =
   | Efield(_, _, ty) -> ty
   | Esizeof(_, ty) -> ty
   | Ealignof(_, ty) -> ty
+  | Enull_check(_) -> Ctypes.Tint(Ctypes.IBool, Signed, noattr)
 
 let is_composite ty =
   match ty with
@@ -117,8 +133,8 @@ let rec gen_ty_rust ty =
   | Ctypes.Tarray(ity, num_ele, attrs) ->
     let fmted_ity = gen_ty_rust ity in
     sprintf "[ %s; %ld]"  fmted_ity (camlint_of_coqint num_ele)
-  | Ctypes.Tstruct(id, attr) -> (extern_atom id)
-  | Ctypes.Tunion(id, attr) -> (extern_atom id)
+  | Ctypes.Tstruct(id, attr) -> (extern_atom_r id)
+  | Ctypes.Tunion(id, attr) -> (extern_atom_r id)
   | Ctypes.Tfloat(sz, a) -> name_floattype_rust sz
   | Ctypes.Tlong(sz, a) -> name_longtype_rust sz
   (* raw pointer only right now *)
@@ -183,7 +199,7 @@ let string_of_init id =
   in List.iter add_init id; Buffer.contents b
 
 let print_globvar fmt id v =
-  let name_bare = extern_atom id in
+  let name_bare = extern_atom_r id in
   let linkage = if C2C.atom_is_static id then "" else "pub " in
   (* need to do static analysis pass to conclude that this is actually static mut *)
   (* in rust, const a : u32 = 5; ensure (with the compiler) that a is not writable. Ever *)
@@ -206,7 +222,7 @@ let print_globvar fmt id v =
           fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name v.gvar_info);
           print_primitive_init fmt i1
       | _, il ->
-          if Str.string_match re_string_literal (extern_atom id) 0
+          if Str.string_match re_string_literal (extern_atom_r id) 0
           && List.for_all (function Init_int8 _ -> true | _ -> false) il
           then
             (
@@ -224,6 +240,10 @@ let print_globvar fmt id v =
 
 let rec print_expr fmt e =
   match e with
+  | Eif_then_else(cond, if_branch, else_branch, _ty) ->(
+      fprintf fmt "@[<v 2>if %a {@ %a@;<0 -2>} else {@;%a@;<0 -2>}@]"
+        print_expr cond print_expr if_branch print_expr else_branch
+    )
   | Econst_int(n, Ctypes.Tint(I32, Unsigned, _)) ->
     fprintf fmt "(%lu as libc::c_uint)" (camlint_of_coqint n)
   | Econst_int(n, Ctypes.Tint(IBool, _, _)) ->
@@ -243,7 +263,7 @@ let rec print_expr fmt e =
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
     fprintf fmt "%LdLL" (camlint64_of_coqint n)
-  | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom id) (* (_ty ==) *)
+  | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom_r id) (* (_ty ==) *)
   | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
   | RustLight.Eunop (op_ty, exp, ty) ->
     (
@@ -259,7 +279,15 @@ let rec print_expr fmt e =
       in
       fprintf fmt "((%s%a) as %s)" op_name print_expr exp (gen_ty_rust ty);
     )
-  | RustLight.Ebinop (op_type, e1, e2, ty) ->
+  | RustLight.Ebinop (op_type, e1, e2, ty) -> (
+    begin match (type_of_expr e1, type_of_expr e2) with
+    | (Ctypes.Tpointer(_, _), Ctypes.Tint(_, _, _)) -> (
+        handle_ptr_arithmetic fmt op_type e1 e2
+      )
+    | (Ctypes.Tint(_, _, _), Ctypes.Tpointer(_, _)) -> (
+        handle_ptr_arithmetic fmt op_type e2 e1
+      )
+    | (_, _) ->
     (
       let op_name =
         begin match op_type with
@@ -283,7 +311,9 @@ let rec print_expr fmt e =
       in
       fprintf fmt "(%a %s %a)" print_expr e1 op_name print_expr e2
     )
-  | RustLight.Efield (exp, id, ty) -> fprintf fmt "%a.%s" print_expr exp (extern_atom id)
+    end
+  )
+  | RustLight.Efield (exp, id, ty) -> fprintf fmt "%a.%s" print_expr exp (extern_atom_r id)
   | RustLight.Ederef (exp, _ty (* type we derefernce into *)) -> (
     (* type we were before dereferencing *)
     let exp_ty = type_of_expr exp in
@@ -312,8 +342,14 @@ let rec print_expr fmt e =
 
     (* may only cast between scalar types  *)
     match (e_ty_is_composite, to_ty_is_composite) with
-    | (false, false) -> fprintf fmt "(%a as %s (%s, %s))" print_expr exp (gen_ty_rust ty) (gen_ty_rust e_ty) (gen_ty_rust ty)
-    | (b1, b2) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2
+    | (false, false) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust ty)
+    | (b1, b2) -> (
+      match (e_ty, ty) with
+      (* TODO go back in rustlight and make sure it's not a wild cast... *)
+      | (Ctypes.Tarray(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a).as_mut_ptr()" print_expr exp
+      | (Ctypes.Tfunction(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust ty)
+      | (_, _) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2; fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust e_ty) (gen_ty_rust ty);
+    )
 
     (* somewhat complicated because we might want to use *)
     (* `as` on pointers *)
@@ -324,6 +360,18 @@ let rec print_expr fmt e =
     fprintf fmt "(std::mem::sizeof::<%s>() as %s)" (gen_ty_rust ty) (gen_ty_rust ty')
   | RustLight.Ealignof (ty, ty') ->
     fprintf fmt "(std::mem::alignof::<%s>() as %s)" (gen_ty_rust ty) (gen_ty_rust ty')
+  | RustLight.Enull_check(exp) ->
+    fprintf fmt "((%a).is_null())" print_expr exp
+  and handle_ptr_arithmetic fmt binop ptr_exp int_exp =
+    let fn_name =
+    begin match binop with
+      | Cop.Oadd -> "add"
+      | Cop.Osub -> "sub"
+      | _ -> "ERROR"
+    end in
+    (* TODO should be reflected in semantics *)
+    fprintf fmt "((%a).%s(%a as usize))" print_expr ptr_exp fn_name print_expr int_exp
+
 
 let rec print_arglist fmt arglist =
   match arglist with
@@ -337,7 +385,12 @@ let rec print_arglist fmt arglist =
 let rec print_stmt fmt body =
   match body with
   | S_skip -> fprintf fmt "/* skip stmt */@;";
-  | S_assign(e1, e2) -> fprintf fmt "@[<hv 2>%a =@ %a;@]" print_expr e1 print_expr e2;
+  | S_assign(e1, e2) -> (
+      fprintf fmt "@[<hv 2>%a =@ %a;@]"
+        print_expr e1
+        (* (gen_ty_rust (type_of_expr e1)) *)
+        print_expr e2;
+    )
   | S_set(id, e) -> fprintf fmt "@[<hv 2>%s =@ %a;@]" (temp_name id) print_expr e;
   | S_return(Some (exp, ty)) -> fprintf fmt "return %a;" print_expr exp
   | S_return(None) -> fprintf fmt "return;"
@@ -381,6 +434,10 @@ let rec print_stmt fmt body =
         print_expr name
         print_arglist arg_list
     )
+  | S_exit(ecode) -> (
+      fprintf fmt "@[<hv 2>::std::process::exit@,(@[<hov 0>%a@]);@]"
+        print_expr ecode
+    )
   | S_call(None, name, arg_list) -> (
       fprintf fmt "@[<hv 2>%a@,(@[<hov 0>%a@]);@]"
         print_expr name
@@ -398,23 +455,41 @@ and print_cases fmt cases =
 
 (* fn name(param: ty, ) -> { body  } *)
 let print_function fmt id fn =
-  let fn_name = (extern_atom id) in
+  let fn_name = extern_atom_r id in
+
+  (* TODO this is cursed and will get better once we integrate with compcerto*)
+  (* let fn_name =  *)
+  (*   if unprocessed_name = "main" then "main_2" *)
+  (*   else if (String.get unprocessed_name 0) = '$' then "main" *)
+  (*   else unprocessed_name in *)
   let fn_params = fn.fn_params in
-  let fn_linkage = if C2C.atom_is_static id then "" else "pub " in
+  let fn_linkage = if C2C.atom_is_static id then "" else "pub" in
   let fn_args =
     fn_params
-    |> List.map (fun (tid, tty) -> gen_name_and_ty_rust (extern_atom tid) tty)
+    |> List.map (fun (tid, tty) -> gen_name_and_ty_rust (extern_atom_r tid) tty)
     |> String.concat ", "
   in
 
-  fprintf fmt "#[no_mangle]@ %sunsafe extern \"C\" fn %s(%s) -> %s" fn_linkage fn_name fn_args (gen_ty_rust fn.fn_return);
-  fprintf fmt "@ @[<v 2>{@ ";
-  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (extern_atom vid) vty) ) fn.fn_vars;
+  (* HACK this should be reflected in the semantics of rustlight *)
+  (* But, we haven't gotten there yet. Rustlight is still generic over c types which isn't right. *)
+  let rty = if fn_name = "main" then "!" else gen_ty_rust fn.fn_return in
+  let needs_space = if String.length fn_linkage != 0 then " " else "" in
+
+  (* let safety_qualifier = if fn.fn_is_safe then "" else "unsafe" in *)
+
+  let externc = if fn_name = "main" then "" else ( "extern \"C\"") in
+  let nomangle = if fn_name = "main" then "" else "#[no_mangle]" in
+
+
+  fprintf fmt "%s@ @[<v 2>%s%s%s fn %s(%s) -> %s " nomangle fn_linkage needs_space externc fn_name fn_args rty;
+  (* fprintf fmt "@ @[<v 2>{@ "; *)
+  fprintf fmt "{@ @[<v 2>unsafe {@ ";
+  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (extern_atom_r vid) vty) ) fn.fn_vars;
   List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (temp_name vid) vty) ) fn.fn_temps;
 
   print_stmt fmt fn.fn_body;
 
-  fprintf fmt "@;<0 -2>}@]@ @ "
+  fprintf fmt "@;<0 -2>}@]@;<0 -2>}@]@ "
 
 let print_fundef fmt id fundef =
   match fundef with
@@ -431,7 +506,7 @@ let struct_or_union = function Struct -> "struct" | Union -> "union"
 
 let print_member fmt = function
   | Member_plain(id, ty) ->
-    fprintf fmt "@; %s," (gen_name_and_ty_rust (extern_atom id) ty)
+    fprintf fmt "@; %s," (gen_name_and_ty_rust (extern_atom_r id) ty)
   | _ -> ()
 
 let define_composite fmt (Composite(id, su, m, a)) =
@@ -443,7 +518,7 @@ let define_composite fmt (Composite(id, su, m, a)) =
   in
 
   (* either I define this locally or I'm importing it. Even if this is a local-only thing, it's hidden behind the module so this is fine *)
-  fprintf fmt "#[repr(C%s)]@;@[<v 2>pub %s %s {" maybe_aligned (struct_or_union su) (extern_atom id);
+  fprintf fmt "#[repr(C%s)]@;@[<v 2>pub %s %s {" maybe_aligned (struct_or_union su) (extern_atom_r id);
   List.iter (print_member fmt) m;
   fprintf fmt "@;<0 -2>}@]@; @;"
 
@@ -453,7 +528,7 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
   printf "UID list of ids %d\n" (List.length list_of_ids);
   List.fold_left
     (fun acc id ->
-       let name = extern_atom id in
+       let name = extern_atom_r id in
        let maybe_module = Hashtbl.find_opt mapping name in
        match maybe_module with
        (* TODO this is the exact line where we can insert libc symbols. It would be good to know what those symbols are, though. *)
@@ -512,7 +587,7 @@ let [@warning "-42"] gen_imports
   let defined_in_module  =
     List.filter (
       fun dfn ->
-        let r = match dfn with | Composite(id, _,  _, _) -> extern_atom id in
+        let r = match dfn with | Composite(id, _,  _, _) -> extern_atom_r id in
         match Hashtbl.find_opt composite_mapping r with
         (* not possible? *)
         | None -> printf "UUID: NOT FOUND STRUCT %s" r; false
@@ -523,7 +598,7 @@ let [@warning "-42"] gen_imports
     ) prog_types in
   let imports_from_composite = List.fold_left (
     fun (acc : (string, StringSet.t) Hashtbl.t) elt -> (
-        let r = match elt with | Composite(id, _,  _, _) -> extern_atom id in
+        let r = match elt with | Composite(id, _,  _, _) -> extern_atom_r id in
         match Hashtbl.find_opt composite_mapping r with
         (* internal to module *)
         | Some(None) -> acc
@@ -546,11 +621,12 @@ let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_i
         fprintf fmt "@[";
         let elts = StringSet.elements impts in
         let size = List.length elts in
+        let crate = if module_ == "libc" then "" else "crate::" in
         (if size == 1 then
           let ele = List.hd elts in
-          fprintf fmt "use crate::%s::%s;" module_ ele
+          fprintf fmt "use %s%s::%s;" crate module_ ele
         else (
-          fprintf fmt "use crate::%s::{" module_;
+          fprintf fmt "use %s%s::{" crate module_;
           List.iter (fun x -> fprintf fmt "%s, " x) elts;
           fprintf fmt "};"
         ));
@@ -570,7 +646,7 @@ let print_program (sym_mapping: (string, string) Hashtbl.t) composite_mapping mo
 
   print_imports f imports composite_mapping;
 
-  List.iter (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom id)) in_module_composite_dfns;
+  List.iter (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_dfns;
 
   List.iter (define_composite f) in_module_composite_dfns;
   List.iter (print_globdef f) p_defs;
