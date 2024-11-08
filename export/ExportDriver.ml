@@ -60,10 +60,10 @@ let export_clight sourcename csyntax ofile dump_rustlight =
 
   printf "%s" "Camels\n";
 
-  let rustlight = RustLight.transl_program clight in
+  (* let rustlight = RustLight.transl_program clight in *)
 
-  (**this is where we want to print to rust*)
-  PrintRustLight.print_if rustlight;
+  (* (\* this is where we want to print to rust*\) *)
+  (* PrintRustLight.print_if rustlight; *)
 
   (* Print Clight in Coq syntax *)
   let oc = open_out ofile in

@@ -1104,7 +1104,7 @@ and elab_struct_or_union_info kind loc env members attrs =
   let m = List.flatten m in
   let m,_ = mmap (fun c fld  ->
       if fld.fld_anonymous then
-        let name = Printf.sprintf "<anon>_%d" c in
+        let name = Printf.sprintf "anon_%d" c in
         {fld with fld_name = name},c+1
       else
         fld,c) 0 m in

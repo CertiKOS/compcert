@@ -175,7 +175,7 @@ Definition transf_clight_program (p: Clight.program) : res Asm.program :=
 Definition drop_rustlight (p: (Clight.program * RustLight.r_program)) : res Clight.program :=
   OK (fst p).
 
-Definition get_exports (p: Csyntax.program) : res (list string* list (string* Ctypes.composite_definition)) :=
+Definition get_exports (p: Csyntax.program) : res (list string * list (string* Ctypes.composite_definition)) :=
   OK p
   @@@ SimplExpr.transl_program
   @@@ (fun (p': Clight.program) => OK(extract_Symbols p')).

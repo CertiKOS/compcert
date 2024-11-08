@@ -1112,27 +1112,28 @@ Definition transl_program (c_prog: Clight.program) : res (r_program) :=
        end)
      c_prog.(Ctypes.prog_defs)) in
 
-  (* get the main replacement ident. *)
-  let new_main_ident := SimplExpr.first_unused_ident tt in
+  (* TODO need to evalualte the initialization expression in case it involves say taking an address of a gloval variable from another file *)
+  (* low priority *)
+  do translated_fns  <-
+      AST.transf_globdefs
+        (transl_fundef c_prog.(prog_comp_env) global_symbols)
+        transl_globvar
+        (* (cons (new_main_ident, new_main) c_prog.(prog_defs)); *)
+        c_prog.(prog_defs);
+
   let old_main_ident := c_prog.(Ctypes.prog_main) in
   let old_main_fn := find (fun x => AST.ident_eq (fst x) old_main_ident)
-                            (Ctypes.prog_defs c_prog) in
+                        (Ctypes.prog_defs c_prog) in
 
   match old_main_fn with
   | Some(omf) => (
+      (* get the main replacement ident. *)
+      let new_main_ident := SimplExpr.first_unused_ident tt in
 
       (* do new_main <- gen_new_main (snd omf) c_prog.(prog_main) (new_main_ident); *)
       do new_main <- gen_new_main' (snd omf) c_prog.(prog_main) (new_main_ident) ;
 
 
-      (* TODO need to evalualte the initialization expression in case it involves say taking an address of a gloval variable from another file *)
-      (* low priority *)
-      do translated_fns  <-
-          AST.transf_globdefs
-            (transl_fundef c_prog.(prog_comp_env) global_symbols)
-            transl_globvar
-            (* (cons (new_main_ident, new_main) c_prog.(prog_defs)); *)
-            c_prog.(prog_defs);
       let r_prog : r_program :=
         {|
           (* PUBLIC only fns *)
@@ -1148,7 +1149,19 @@ Definition transl_program (c_prog: Clight.program) : res (r_program) :=
 
   )
   | None => (
-    Error(msg "Main function not found?")
+    (* Error(msg "Main function not found?") *)
+    let r_prog : r_program :=
+      {|
+        (* PUBLIC only fns *)
+        Ctypes.prog_defs := translated_fns;
+        Ctypes.prog_public := c_prog.(prog_public);
+        Ctypes.prog_main := old_main_ident;
+        Ctypes.prog_types := c_prog.(prog_types);
+        Ctypes.prog_comp_env := c_prog.(prog_comp_env);
+        Ctypes.prog_comp_env_eq := c_prog.(prog_comp_env_eq);
+      |} in
+
+    OK(r_prog)
 
   )
   end.

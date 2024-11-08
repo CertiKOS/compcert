@@ -351,7 +351,10 @@ let extract_symbols (prog : Clight.program)
       )
       prog.prog_defs in
   let tys =  (
-    List.map (fun ty -> (tmp_conv_fn (extern_atom (match ty with Composite (id, _, _, _) -> id)), ty)) prog.prog_types
+    List.map
+      (fun ty ->
+         (tmp_conv_fn (extern_atom (match ty with Composite (id, _, _, _) -> id)), ty))
+      prog.prog_types
   ) in
   (* let _ = printf "\nPTYPES HI I RAN"; List.map *)
   (*   (fun x -> *)

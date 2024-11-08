@@ -589,10 +589,17 @@ let [@warning "-42"] gen_imports
       fun dfn ->
         let r = match dfn with | Composite(id, _,  _, _) -> extern_atom_r id in
         match Hashtbl.find_opt composite_mapping r with
-        (* not possible? *)
-        | None -> printf "UUID: NOT FOUND STRUCT %s" r; false
+        (* This can happen if the struct is anonymous. *)
+        (* | None -> printf "UUID: NOT FOUND STRUCT %s" r; false *)
+        | None -> printf "ANON struct %s" r; false
         (* might be external to module *)
-        | Some (Some (mname, _)) -> printf "\nUUID: mod name %s, %s len modname: %d, nmame %d, eq %b\n" mod_name mname (String.length mod_name) (String.length mname) (mname = mod_name) ; mname = mod_name
+        | Some (Some (mname, _)) ->
+          printf "\nUUID: mod name %s, %s len modname: %d, nmame %d, eq %b\n"
+            mod_name mname
+            (String.length mod_name)
+            (String.length mname)
+            (mname = mod_name) ;
+            mname = mod_name
         (* internal to module *)
         | Some (None) -> true
     ) prog_types in
@@ -602,7 +609,7 @@ let [@warning "-42"] gen_imports
         match Hashtbl.find_opt composite_mapping r with
         (* internal to module *)
         | Some(None) -> acc
-        (* not possible? *)
+        (* This can happen if the struct is anonymous ? *)
         | None -> printf "NOT FOUND STRUCT %s" r; acc
         (* might be external to module *)
         | Some (Some (mname, _)) -> (

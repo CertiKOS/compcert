@@ -1,2 +1,13 @@
 clean:
-  rm -rf $(find . -name "target_dirs")
+  rm -rf $(find . -name "rust_project")
+
+build *name:
+  pushd {{name}} && ccomp  -L{{env_var('RUNTIME')}} -lm -drustlight $(find . -type f -name "*.c" ! -name "*light.c") && popd
+
+compile *name:
+  just build {{name}} || exit -1
+  pushd {{name}}/rust_project && cargo build && popd
+
+compile_all:
+  just clean
+  for dir in `find . -maxdepth 1 -type d ! -name "." ! -name ".."`; do just compile $dir; done

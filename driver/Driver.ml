@@ -555,6 +555,15 @@ let cmdline_actions =
 
 let create_toml unit =
   let oc = open_out "Cargo.toml" in  (* Open the file for writing *)
+  let maybe_bin =
+    match Hashtbl.find_opt !sym_mapping "main" with
+    | Some main_name ->
+{|
+[[bin]]
+name = "main"
+path = "./src/|} ^ main_name ^ ".rs\""
+    | None -> ""
+  in
   (* TODO is there a less ugly way to do this without carrying the whitespace? *)
   let content = {|
 [package]
@@ -565,16 +574,27 @@ edition = "2021"
 [dependencies]
 libc = "0.2.158"
 
-[[bin]]
-name = "main"
-path = "./src/|} ^ (Hashtbl.find !sym_mapping "main") ^ ".rs\"" in
+[lib]
+path = "src/lib.rs"
+
+|} ^ maybe_bin
+in
+
   output_string oc content;      (* Write the string to the file *)
   close_out oc
+
+let strip_dot_slash s =
+  let prefix = "./" in
+  if String.length s >= 2 && String.sub s 0 2 = prefix then
+    String.sub s 2 (String.length s - 2)
+  else
+    s
+
 
 let create_lib unit =
   let content = List.fold_left
       (fun result file ->
-         let module_name = String.sub file 0 ((String.length file) - 2) in
+         let module_name = String.sub file 0 ((String.length file) - 2) |> strip_dot_slash in
          result^"\npub mod "^module_name^";\n") "" !list_c_files in
   let oc = open_out "lib.rs" in
   output_string oc content;
