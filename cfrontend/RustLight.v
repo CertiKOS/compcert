@@ -944,7 +944,15 @@ Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement
   match stmt with
   | S_skip => PTree.empty _
   | S_assign rexpr_1 rexpr_2 => merge_trees (walk_r_expr rexpr_1) (walk_r_expr rexpr_2)
-  | S_set _ rexpr => (walk_r_expr rexpr)
+  | S_set id_1 rexpr =>
+      (
+        let t1 :=
+        match PTree.get id_1 in_scope_syms with
+        | None => PTree.set id_1 tt (PTree.empty _)
+        | Some tt => PTree.empty _
+        end in
+        merge_trees t1 (walk_r_expr rexpr)
+      )
   | S_sequence s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_continue _ => PTree.empty _
   | S_loop _ s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
@@ -976,6 +984,13 @@ Locate map.
 (* - implement union for hashsets *)
 (* - return a tree everywhere instead of a list *)
 (* - change funciton type to ptree.t unit *)
+
+
+Fixpoint nat_to_string (n : nat) : string :=
+  match n with
+  | 0%nat => "0"
+  | S p => "0" ++ (nat_to_string (p))
+  end.
 
 Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_syms: list ident) : res r_function :=
   let return_type := (Clight.fn_return f) in
@@ -1010,19 +1025,37 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
       (* variadic. _n means # of fixed args *)
       | Some _n => Error(msg "Variadics are currently unsupported when converting to rust")
       (* not variadic *)
-      | None =>
-          let in_scope_symbols := (map fst f.(Clight.fn_vars)) ++ glob_syms in
-          let in_scope_symbols_tree := fold_left (fun (acc : PTree.t unit) (elt: ident) => PTree.set elt tt acc) in_scope_symbols (PTree.empty _) in
-          OK({|
-                fn_return := return_type;
-                fn_callconv := {| cc_structret := (AST.cc_structret cc) |};
-                fn_params := f.(Clight.fn_params);
-                fn_vars := f.(Clight.fn_vars);
-                fn_temps := r_g.(SimplExpr.gen_trail);
-                fn_body := r_body;
-                fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
-                fn_is_safe := false;
-              |})
+      | None => (
+          let in_scope_symbols := (map fst f.(Clight.fn_vars)) ++ (map fst f.(Clight.fn_params)) ++ glob_syms in
+          let in_scope_symbols_tree := fold_left (fun (acc : PTree.t unit) (elt: ident) => PTree.set elt tt acc)
+                                         in_scope_symbols (PTree.empty _) in
+          let len := List.length in_scope_symbols in
+
+
+          let sanity_check :=
+            fold_left (fun (acc : bool) (elt: ident) =>
+              match PTree.get elt in_scope_symbols_tree with
+              | Some(tt) => acc
+              | None => false
+              end
+              )
+              in_scope_symbols
+              (true) in
+          match sanity_check with
+          | true =>
+              (* Error(msg ("number of symbols: " ++ (nat_to_string len))) *)
+            OK({|
+                  fn_return := return_type;
+                  fn_callconv := {| cc_structret := (AST.cc_structret cc) |};
+                  fn_params := f.(Clight.fn_params);
+                  fn_vars := f.(Clight.fn_vars);
+                  fn_temps := r_g.(SimplExpr.gen_trail);
+                  fn_body := r_body;
+                  fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
+                  fn_is_safe := false;
+                |})
+          | false => Error(msg "sanity check failed")
+        end)
       end
   end.
 

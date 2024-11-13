@@ -8,6 +8,7 @@ open RustLight
 let extern_atom_r a =
   try
     let res = Hashtbl.find string_of_atom a in
+    (* let _ = printf "NAMEVAR: %s\n" res in *)
     if res = "main" then "main_2" else res
   with Not_found ->
     "main"
@@ -123,15 +124,15 @@ let rec map_tylist_to_list tylist =
   | Tnil -> []
   | Tcons(ty, tyl) -> ty :: (map_tylist_to_list tyl)
 
-let rec gen_ty_rust ty =
+let rec gen_ty_rust is_nested ty =
   match ty with
-  | Ctypes.Tvoid -> "libc::c_void"
+  | Ctypes.Tvoid -> if is_nested then "libc::c_void" else "()"
   | Ctypes.Tint(sz, sg, a) ->
     (* TODO ignoring the attributes for now. The volatile should be handled a layer up probably. Same for align? Either way going for the easy thing *)
     (* TODO deal with visibility modifier *)
     name_inttype_rust sz sg
   | Ctypes.Tarray(ity, num_ele, attrs) ->
-    let fmted_ity = gen_ty_rust ity in
+    let fmted_ity = gen_ty_rust true ity in
     sprintf "[ %s; %ld]"  fmted_ity (camlint_of_coqint num_ele)
   | Ctypes.Tstruct(id, attr) -> (extern_atom_r id)
   | Ctypes.Tunion(id, attr) -> (extern_atom_r id)
@@ -139,22 +140,22 @@ let rec gen_ty_rust ty =
   | Ctypes.Tlong(sz, a) -> name_longtype_rust sz
   (* raw pointer only right now *)
   (* TODO handle the attributes on a type *)
-  | Ctypes.Tpointer(ty, _a) -> sprintf "*mut %s" (gen_ty_rust ty)
+  | Ctypes.Tpointer(ty, _a) -> sprintf "*mut %s" (gen_ty_rust true ty)
   (* function pointers *)
   | Ctypes.Tfunction(tylist, ty, cc) ->
-      let r_arglist = List.map gen_ty_rust (map_tylist_to_list tylist) |> String.concat "," in
+      let r_arglist = List.map (gen_ty_rust false) (map_tylist_to_list tylist) |> String.concat "," in
       (* TODO this makes for nicer code, but should we be mappign to c_void or unit everywhere? *)
       (* cvoid should only appear in function signatures by itself *)
-      let rust_ret_ty = if ty == Ctypes.Tvoid then "()" else (gen_ty_rust ty) in
+      let rust_ret_ty = (gen_ty_rust false ty) in
       sprintf "(fn(%s) -> %s)" r_arglist rust_ret_ty
 
 let map_to_unsigned =
   function
   | Ctypes.Tarray(Ctypes.Tint(I8, _, attrs), num_ele, a) ->
     Ctypes.Tarray(Ctypes.Tint(I8, Unsigned, attrs), num_ele, a)
-  | ty -> Format.printf "error! something besides expected type for %s\n" (gen_ty_rust ty); ty
+  | ty -> Format.printf "error! something besides expected type for %s\n" (gen_ty_rust false ty); ty
 
-let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust ty)
+let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust false ty)
 
 let print_primitive_init fmt = function
   | Init_int8 n -> fprintf fmt"%ld" (camlint_of_coqint n)
@@ -254,11 +255,11 @@ let rec print_expr fmt e =
     | _ -> "ERROR bool is outside {0, 1}"
     end
   | Econst_int(n, ty) ->
-    fprintf fmt "(%ld as %s)" (camlint_of_coqint n) (gen_ty_rust ty)
+    fprintf fmt "(%ld as %s)" (camlint_of_coqint n) (gen_ty_rust false ty)
   | Econst_float(f, ty) ->
-    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat f) (gen_ty_rust ty)
+    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat f) (gen_ty_rust false ty)
   | Econst_single(f, ty) ->
-    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat32 f) (gen_ty_rust ty)
+    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat32 f) (gen_ty_rust false ty)
   | Econst_long(n, Ctypes.Tlong(Unsigned, _)) ->
     fprintf fmt "%LuLLU" (camlint64_of_coqint n)
   | Econst_long(n, _) ->
@@ -277,7 +278,7 @@ let rec print_expr fmt e =
       | Cop.Oabsfloat -> "UNSUPPORTED OP"
       end
       in
-      fprintf fmt "((%s%a) as %s)" op_name print_expr exp (gen_ty_rust ty);
+      fprintf fmt "((%s%a) as %s)" op_name print_expr exp (gen_ty_rust false ty);
     )
   | RustLight.Ebinop (op_type, e1, e2, ty) -> (
     begin match (type_of_expr e1, type_of_expr e2) with
@@ -342,13 +343,13 @@ let rec print_expr fmt e =
 
     (* may only cast between scalar types  *)
     match (e_ty_is_composite, to_ty_is_composite) with
-    | (false, false) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust ty)
+    | (false, false) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
     | (b1, b2) -> (
       match (e_ty, ty) with
       (* TODO go back in rustlight and make sure it's not a wild cast... *)
       | (Ctypes.Tarray(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a).as_mut_ptr()" print_expr exp
-      | (Ctypes.Tfunction(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust ty)
-      | (_, _) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2; fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust e_ty) (gen_ty_rust ty);
+      | (Ctypes.Tfunction(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
+      | (_, _) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2; fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty);
     )
 
     (* somewhat complicated because we might want to use *)
@@ -357,9 +358,9 @@ let rec print_expr fmt e =
     (* fprintf fmt "TODO casts are unimplemented" *)
     )
   | RustLight.Esizeof (ty, ty') ->
-    fprintf fmt "(std::mem::sizeof::<%s>() as %s)" (gen_ty_rust ty) (gen_ty_rust ty')
+    fprintf fmt "(std::mem::sizeof::<%s>() as %s)" (gen_ty_rust false ty) (gen_ty_rust false ty')
   | RustLight.Ealignof (ty, ty') ->
-    fprintf fmt "(std::mem::alignof::<%s>() as %s)" (gen_ty_rust ty) (gen_ty_rust ty')
+    fprintf fmt "(std::mem::alignof::<%s>() as %s)" (gen_ty_rust false ty) (gen_ty_rust false ty')
   | RustLight.Enull_check(exp) ->
     fprintf fmt "((%a).is_null())" print_expr exp
   and handle_ptr_arithmetic fmt binop ptr_exp int_exp =
@@ -467,12 +468,13 @@ let print_function fmt id fn =
   let fn_args =
     fn_params
     |> List.map (fun (tid, tty) -> gen_name_and_ty_rust (extern_atom_r tid) tty)
+    |> List.map(fun x -> "mut " ^ x)
     |> String.concat ", "
   in
 
   (* HACK this should be reflected in the semantics of rustlight *)
   (* But, we haven't gotten there yet. Rustlight is still generic over c types which isn't right. *)
-  let rty = if fn_name = "main" then "!" else gen_ty_rust fn.fn_return in
+  let rty = if fn_name = "main" then "!" else gen_ty_rust false fn.fn_return in
   let needs_space = if String.length fn_linkage != 0 then " " else "" in
 
   (* let safety_qualifier = if fn.fn_is_safe then "" else "unsafe" in *)
@@ -591,7 +593,7 @@ let [@warning "-42"] gen_imports
         match Hashtbl.find_opt composite_mapping r with
         (* This can happen if the struct is anonymous. *)
         (* | None -> printf "UUID: NOT FOUND STRUCT %s" r; false *)
-        | None -> printf "ANON struct %s" r; false
+        | None -> printf "ANON struct %s" r; true
         (* might be external to module *)
         | Some (Some (mname, _)) ->
           printf "\nUUID: mod name %s, %s len modname: %d, nmame %d, eq %b\n"
@@ -653,7 +655,10 @@ let print_program (sym_mapping: (string, string) Hashtbl.t) composite_mapping mo
 
   print_imports f imports composite_mapping;
 
-  List.iter (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_dfns;
+  List.iter
+    (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name
+                (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id))
+    in_module_composite_dfns;
 
   List.iter (define_composite f) in_module_composite_dfns;
   List.iter (print_globdef f) p_defs;
@@ -666,10 +671,12 @@ let change_directory dir_name =
   | Unix.Unix_error (err, _, _) ->
     Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
 
+(* global syms  *)
 let fix_mapping_types (mapping: (char list * char list) list) : (string, string) Hashtbl.t =
   let elts = List.map (fun (a, b) -> (String.of_seq (List.to_seq a), String.of_seq (List.to_seq b))) mapping in
   List.fold_left (fun acc (k, v) -> Hashtbl.replace acc k v; acc) (Hashtbl.create 7) elts
 
+(* global composite defns *)
 let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_definition) option)) list) : (string, (string * Ctypes.composite_definition) option) Hashtbl.t =
   let elts = List.map (fun (k, opt_v) ->
     let k_str = String.of_seq (List.to_seq k) in
