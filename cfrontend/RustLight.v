@@ -261,20 +261,20 @@ Definition gen_cast_for_conditional
   match ty with
   | Ctypes.Tlong _ _ =>
       gdom zero_const <- gen_zero_const ty;
-      SimplExpr.ret (Ebinop Ogt expr zero_const cond_type)
+      SimplExpr.ret (Ebinop One expr zero_const cond_type)
   (* do nothing here *)
   | Ctypes.Tint Ctypes.IBool _ _ =>
       SimplExpr.ret (expr)
   (* we need to translate from an integer to a boolean *)
   | Ctypes.Tint _ _ _attrs  =>
       gdom zero_const <- gen_zero_const ty;
-      SimplExpr.ret (Ebinop Ogt expr zero_const cond_type)
+      SimplExpr.ret (Ebinop One expr zero_const cond_type)
   | Ctypes.Tfloat Ctypes.F64 _attrs  =>
       gdom zero_const <- gen_zero_const ty;
-      SimplExpr.ret (Ebinop Ogt expr zero_const cond_type)
+      SimplExpr.ret (Ebinop One expr zero_const cond_type)
   | Ctypes.Tfloat Ctypes.F32 _attrs  =>
       gdom zero_const <- gen_zero_const ty;
-      SimplExpr.ret (Ebinop Ogt expr zero_const cond_type)
+      SimplExpr.ret (Ebinop One expr zero_const cond_type)
   | Ctypes.Tpointer ty _attrs  =>
       SimplExpr.ret (Enull_check expr)
   (* | Ctypes. *)
@@ -442,40 +442,40 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : SimplExpr
           (* TODO I'm assuming we don't care about attributes. *)
           (*      But, I couldn't find anything in the c99 spec about this *)
             let r_ty := bang_type in
-            let conditional := Ebinop Ogt translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 1)  bang_type in
-            let else_expr := Econst_int (Int.repr 0 ) bang_type in
+            let conditional := Ebinop One translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  bang_type in
+            let else_expr := Econst_int (Int.repr 1 ) bang_type in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tlong _ _ => (
             (* TODO separate out into function. It's the same exact code. *)
             let r_ty := bang_type in
-            let conditional := Ebinop Ogt translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 1)  cond_type in
-            let else_expr := Econst_int (Int.repr 0 ) cond_type in
+            let conditional := Ebinop One translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  cond_type in
+            let else_expr := Econst_int (Int.repr 1 ) cond_type in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tfloat Ctypes.F64 _ => (
             (* TODO separate out into function or something. It's the same exact code varying only by float. *)
             let r_ty := bang_type in
-            let conditional := Ebinop Ogt translated_exp (Econst_float (Bits.b64_of_bits 0%Z) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 1)  cond_type in
-            let else_expr := Econst_int (Int.repr 0 ) cond_type in
+            let conditional := Ebinop One translated_exp (Econst_float (Bits.b64_of_bits 0%Z) exp_typ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  cond_type in
+            let else_expr := Econst_int (Int.repr 1 ) cond_type in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tfloat Ctypes.F32 _ => (
             (* TODO separate out into function or something. It's the same exact code varying only by float. *)
             let r_ty := bang_type in
-            let conditional := Ebinop Ogt translated_exp (Econst_single (Bits.b32_of_bits 0%Z) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 1)  cond_type in
-            let else_expr := Econst_int (Int.repr 0 ) cond_type in
+            let conditional := Ebinop One translated_exp (Econst_single (Bits.b32_of_bits 0%Z) exp_typ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  cond_type in
+            let else_expr := Econst_int (Int.repr 1 ) cond_type in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tpointer _ _ => (
             let r_ty := bang_type in
             let conditional := Enull_check translated_exp in
-            let if_expr := Econst_int (Int.repr 1)  cond_type in
-            let else_expr := Econst_int (Int.repr 0 ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  cond_type in
+            let else_expr := Econst_int (Int.repr 1 ) cond_type in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           (* TODO consider the array type *)
@@ -944,7 +944,9 @@ Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement
   match stmt with
   | S_skip => PTree.empty _
   | S_assign rexpr_1 rexpr_2 => merge_trees (walk_r_expr rexpr_1) (walk_r_expr rexpr_2)
+  (* | S_assign rexpr_1 rexpr_2 => merge_trees (PTree.empty _) (PTree.empty _) *)
   | S_set id_1 rexpr =>
+      (* walk_r_expr rexpr *)
       (
         let t1 :=
         match PTree.get id_1 in_scope_syms with
@@ -1026,7 +1028,7 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
       | Some _n => Error(msg "Variadics are currently unsupported when converting to rust")
       (* not variadic *)
       | None => (
-          let in_scope_symbols := (map fst f.(Clight.fn_vars)) ++ (map fst f.(Clight.fn_params)) ++ glob_syms in
+          let in_scope_symbols := (map fst f.(Clight.fn_vars)) ++ (map fst f.(Clight.fn_params)) ++ (map fst f.(Clight.fn_temps)) ++ glob_syms in
           let in_scope_symbols_tree := fold_left (fun (acc : PTree.t unit) (elt: ident) => PTree.set elt tt acc)
                                          in_scope_symbols (PTree.empty _) in
           let len := List.length in_scope_symbols in
@@ -1051,7 +1053,9 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
                   fn_vars := f.(Clight.fn_vars);
                   fn_temps := r_g.(SimplExpr.gen_trail);
                   fn_body := r_body;
+                  (* fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body); *)
                   fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
+                  (* fn_imports := (PTree.empty _); *)
                   fn_is_safe := false;
                 |})
           | false => Error(msg "sanity check failed")
