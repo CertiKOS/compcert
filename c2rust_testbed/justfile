@@ -1,0 +1,21 @@
+clean:
+  rm -rf $(find . -name "rust_project")
+
+build *name:
+  pushd {{name}}
+  ccomp  -L{{env_var('RUNTIME')}} -lm -drustlight $(find . -type f -name "*.c" ! -name "*light.c")
+  mkdir -p {{name}}/tests
+  cp *.rs {{name}}/tests
+  popd
+
+compile *name:
+  just build {{name}}
+  pushd {{name}}
+  cargo build
+  popd
+
+test *name:
+  just compile {{name}}
+  pushd {{name}}
+  cargo test
+  popd

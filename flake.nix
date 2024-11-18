@@ -36,6 +36,7 @@
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
           RUST_SRC_PATH = "${fenixStable}/lib/rustlib/src/rust/library";
           RUST_LIB_SRC = "${fenixStable}/lib/rustlib/src/rust/library";
+          RUSTFLAGS = "-Awarnings";
           shellHook = ''
             export PATH="$PATH:$PWD"
             export "RUNTIME=$PWD/runtime"

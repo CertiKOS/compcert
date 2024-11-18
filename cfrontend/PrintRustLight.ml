@@ -260,10 +260,10 @@ let rec print_expr fmt e =
     fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat f) (gen_ty_rust false ty)
   | Econst_single(f, ty) ->
     fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat32 f) (gen_ty_rust false ty)
-  | Econst_long(n, Ctypes.Tlong(Unsigned, _)) ->
-    fprintf fmt "%LuLLU" (camlint64_of_coqint n)
-  | Econst_long(n, _) ->
-    fprintf fmt "%LdLL" (camlint64_of_coqint n)
+  | Econst_long(n, Ctypes.Tlong(Unsigned, v)) ->
+    fprintf fmt "(%Lu as %s)" (camlint64_of_coqint n) (gen_ty_rust false (Ctypes.Tlong(Unsigned, v)))
+  | Econst_long(n, ty) ->
+    fprintf fmt "(%Ld as %s)" (camlint64_of_coqint n) (gen_ty_rust false ty)
   | RustLight.Evar (id, _ty) -> fprintf fmt "%s" (extern_atom_r id) (* (_ty ==) *)
   | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
   | RustLight.Eunop (op_ty, exp, ty) ->
@@ -349,7 +349,13 @@ let rec print_expr fmt e =
       (* TODO go back in rustlight and make sure it's not a wild cast... *)
       | (Ctypes.Tarray(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a).as_mut_ptr()" print_expr exp
       | (Ctypes.Tfunction(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
-      | (_, _) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2; fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty);
+      | (Ctypes.Tstruct(a, _), Ctypes.Tstruct(b, _)) ->
+        if a == b then fprintf fmt "%a" print_expr exp
+        else
+          printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2;
+          fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty); ()
+      | (_, _) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2;
+        fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty);
     )
 
     (* somewhat complicated because we might want to use *)
@@ -358,9 +364,9 @@ let rec print_expr fmt e =
     (* fprintf fmt "TODO casts are unimplemented" *)
     )
   | RustLight.Esizeof (ty, ty') ->
-    fprintf fmt "(std::mem::sizeof::<%s>() as %s)" (gen_ty_rust false ty) (gen_ty_rust false ty')
+    fprintf fmt "(std::mem::size_of::<%s>() as %s)" (gen_ty_rust false ty) (gen_ty_rust false ty')
   | RustLight.Ealignof (ty, ty') ->
-    fprintf fmt "(std::mem::alignof::<%s>() as %s)" (gen_ty_rust false ty) (gen_ty_rust false ty')
+    fprintf fmt "(std::mem::align_of::<%s>() as %s)" (gen_ty_rust false ty) (gen_ty_rust false ty')
   | RustLight.Enull_check(exp) ->
     fprintf fmt "((%a).is_null())" print_expr exp
   and handle_ptr_arithmetic fmt binop ptr_exp int_exp =
