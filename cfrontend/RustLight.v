@@ -282,6 +282,7 @@ Definition gen_cast_for_conditional
   end.
 
 (* this does general type coersions*)
+(* "implict to explicit type coersion" *)
 Definition i2etc
   (cur_type: type)
   (desired_type: type)
@@ -303,6 +304,10 @@ Definition i2etc
 
   | (_, Ctypes.Tint IBool _ _) => gen_cast_for_conditional expr
   (* TODO may need to cast through some other types*)
+  | (Ctypes.Tint IBool _ a, Ctypes.Tfloat F32 _) =>
+      SimplExpr.ret (Ecast (Ecast expr (Ctypes.Tint I8 Unsigned a)) desired_type)
+  | (Ctypes.Tint IBool _ a, Ctypes.Tfloat F64 _) =>
+      SimplExpr.ret (Ecast (Ecast expr (Ctypes.Tint I8 Unsigned a)) desired_type)
   | (_, _) => SimplExpr.ret (Ecast expr desired_type)
   end.
 
@@ -1202,3 +1207,18 @@ Definition transl_program (c_prog: Clight.program) : res (r_program) :=
 
   )
   end.
+
+(* plan for initialization to 0 for structs *)
+(* statement for each primitive field initialized to 0 *)
+(* if is not a primitive, add a new variable, recursively add initialization to 0 *)
+
+(* plan for temp address of global variable *)
+(* (1) if the type of the expression being evaluated is a pointer type,
+       create create underlying expression as a new static global variable *)
+(*     then the existing addr_of infra should work on the variable. *)
+       (* if it literally is &a, then it's fine already. But if it's a string? *)
+(*     TODO may need to think about double pointers (which...doesn't really make sense)
+ *)
+
+(* for temporaries in particular: check if the root of hte expression is addr_of!. if it's not then *)
+(* we have to separate it out into a separate expression *)
