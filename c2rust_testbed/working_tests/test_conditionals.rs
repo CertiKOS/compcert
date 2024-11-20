@@ -1,9 +1,7 @@
 //use crate::binary_conditional::rust_entry3;
-use rust_project::conditional::entry;
-// TODO(justin) uncomment
-//use crate::conditionals::{rust_entry2, rust_ternaries};
 use libc::{c_int, c_uint};
-use rust_project::conditionals::{entry2, ternaries};
+use rust_project::conditional::entry;
+use rust_project::conditionals::{entry2_cond, ternaries};
 use rust_project::else_if_chain::entry4;
 use rust_project::unused_conditionals::{
     unused_conditional1, unused_conditional2, unused_conditional3,
@@ -33,27 +31,11 @@ pub fn test_buffer2() {
     ];
 
     unsafe {
-        entry2(BUFFER_SIZE2 as u32, buffer.as_mut_ptr());
+        entry2_cond(BUFFER_SIZE2 as u32, buffer.as_mut_ptr());
     }
 
     assert_eq!(buffer, expected_buffer);
 }
-
-//pub fn test_buffer2() {
-//    let mut buffer = [0; BUFFER_SIZE2];
-//    let mut rust_buffer = [0; BUFFER_SIZE2];
-//    let expected_buffer = [
-//        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-//    ];
-//
-//    unsafe {
-//        entry2(BUFFER_SIZE2 as u32, buffer.as_mut_ptr());
-//        rust_entry2(BUFFER_SIZE2 as u32, rust_buffer.as_mut_ptr());
-//    }
-//
-//    assert_eq!(buffer, rust_buffer);
-//    assert_eq!(buffer, expected_buffer);
-//}
 
 //pub fn test_binary_conditionals() {
 //    let mut buffer = [0; BUFFER_SIZE3];

@@ -1,6 +1,6 @@
 use libc::{c_int, c_uint};
 use rust_project::uninitialized::{
-    /*bar,*/ /*baz,*/ /* e,*/ entry2, /*foo,*/ s, /*myint, myintp,*/ u,
+    /*bar,*/ /*baz,*/ /* e,*/ entry2_uninit, /*foo,*/ s, /*myint, myintp,*/ u,
 };
 
 const BUFFER_SIZE: usize = 1;
@@ -11,7 +11,7 @@ pub fn test_buffer() {
     let expected_buffer = [1];
 
     unsafe {
-        entry2(BUFFER_SIZE as u32, buffer.as_mut_ptr());
+        entry2_uninit(BUFFER_SIZE as u32, buffer.as_mut_ptr());
     }
 
     assert_eq!(buffer, expected_buffer);
