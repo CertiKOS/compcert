@@ -258,6 +258,7 @@ Definition gen_cast_for_conditional
   : SimplExpr.mon rexpr
   :=
   let ty := r_typeof expr in
+  (* TODO move zero_const up a level*)
   match ty with
   | Ctypes.Tlong _ _ =>
       gdom zero_const <- gen_zero_const ty;
@@ -276,7 +277,11 @@ Definition gen_cast_for_conditional
       gdom zero_const <- gen_zero_const ty;
       SimplExpr.ret (Ebinop One expr zero_const cond_type)
   | Ctypes.Tpointer ty _attrs  =>
-      SimplExpr.ret (Enull_check expr)
+      let r_ty := bang_type in
+      gdom zero_const <- gen_zero_const r_ty;
+      let if_expr := Econst_int (Int.repr 0)  r_ty in
+      let else_expr := Econst_int (Int.repr 1 ) r_ty in
+      SimplExpr.ret (Ebinop One (Eif_then_else (Enull_check expr) if_expr else_expr r_ty ) zero_const cond_type)
   (* | Ctypes. *)
   | ty => SimplExpr.error (msg (String.append " Expected scalar or pointer type in condition. Got unexpected type: " (type_to_string ty)))
   end.
@@ -448,39 +453,39 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : SimplExpr
           (*      But, I couldn't find anything in the c99 spec about this *)
             let r_ty := bang_type in
             let conditional := Ebinop One translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  bang_type in
-            let else_expr := Econst_int (Int.repr 1 ) bang_type in
+            let if_expr := Econst_int (Int.repr 0)  r_ty in
+            let else_expr := Econst_int (Int.repr 1 ) r_ty in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tlong _ _ => (
             (* TODO separate out into function. It's the same exact code. *)
             let r_ty := bang_type in
             let conditional := Ebinop One translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  cond_type in
-            let else_expr := Econst_int (Int.repr 1 ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  r_ty in
+            let else_expr := Econst_int (Int.repr 1 ) r_ty in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tfloat Ctypes.F64 _ => (
             (* TODO separate out into function or something. It's the same exact code varying only by float. *)
             let r_ty := bang_type in
             let conditional := Ebinop One translated_exp (Econst_float (Bits.b64_of_bits 0%Z) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  cond_type in
-            let else_expr := Econst_int (Int.repr 1 ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  r_ty in
+            let else_expr := Econst_int (Int.repr 1 ) r_ty in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tfloat Ctypes.F32 _ => (
             (* TODO separate out into function or something. It's the same exact code varying only by float. *)
             let r_ty := bang_type in
             let conditional := Ebinop One translated_exp (Econst_single (Bits.b32_of_bits 0%Z) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  cond_type in
-            let else_expr := Econst_int (Int.repr 1 ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  r_ty in
+            let else_expr := Econst_int (Int.repr 1 ) r_ty in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           | Ctypes.Tpointer _ _ => (
             let r_ty := bang_type in
             let conditional := Enull_check translated_exp in
-            let if_expr := Econst_int (Int.repr 0)  cond_type in
-            let else_expr := Econst_int (Int.repr 1 ) cond_type in
+            let if_expr := Econst_int (Int.repr 0)  r_ty in
+            let else_expr := Econst_int (Int.repr 1 ) r_ty in
             SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
           )
           (* TODO consider the array type *)

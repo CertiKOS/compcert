@@ -492,8 +492,11 @@ let print_function fmt id fn =
   fprintf fmt "%s@ @[<v 2>%s%s%s fn %s(%s) -> %s " nomangle fn_linkage needs_space externc fn_name fn_args rty;
   (* fprintf fmt "@ @[<v 2>{@ "; *)
   fprintf fmt "{@ @[<v 2>unsafe {@ ";
-  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (extern_atom_r vid) vty) ) fn.fn_vars;
-  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s;@ " (gen_name_and_ty_rust (temp_name vid) vty) ) fn.fn_temps;
+  (* In C we just reserve on the stack *)
+  (* In Rust to avoid compilation errors we need the entire struct to be initialized before first use. *)
+  (* We translate to that directly *)
+  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s = std::mem::zeroed();@ " (gen_name_and_ty_rust (extern_atom_r vid) vty) ) fn.fn_vars;
+  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s = std::mem::zeroed();@ " (gen_name_and_ty_rust (temp_name vid) vty) ) fn.fn_temps;
 
   print_stmt fmt fn.fn_body;
 
@@ -514,7 +517,7 @@ let struct_or_union = function Struct -> "struct" | Union -> "union"
 
 let print_member fmt = function
   | Member_plain(id, ty) ->
-    fprintf fmt "@; %s," (gen_name_and_ty_rust (extern_atom_r id) ty)
+    fprintf fmt "@; pub %s," (gen_name_and_ty_rust (extern_atom_r id) ty)
   | _ -> ()
 
 let define_composite fmt (Composite(id, su, m, a)) =
