@@ -147,7 +147,8 @@ let rec gen_ty_rust is_nested ty =
       (* TODO this makes for nicer code, but should we be mappign to c_void or unit everywhere? *)
       (* cvoid should only appear in function signatures by itself *)
       let rust_ret_ty = (gen_ty_rust false ty) in
-      sprintf "(fn(%s) -> %s)" r_arglist rust_ret_ty
+      (* all C functions and C pointers look like this *)
+      sprintf "(extern \"C\" fn(%s) -> %s)" r_arglist rust_ret_ty
 
 let map_to_unsigned =
   function
@@ -227,9 +228,11 @@ let print_globvar fmt id v =
           && List.for_all (function Init_int8 _ -> true | _ -> false) il
           then
             (
-              fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name (map_to_unsigned v.gvar_info));
               (* dereference here because string literals are pointers to byte arrays  *)
-              fprintf fmt "*b\"%s\"" (string_of_init (il))
+              (* transmute here because the literal isn't the expected type. In C it's signed and in rust it's unsigned *)
+              (* We're black boxing the entire thing and just saying "this is what we expect it to be"  *)
+              fprintf fmt "@[<hov 2>%s = unsafe { std::mem::transmute(" (gen_name_and_ty_rust name v.gvar_info);
+              fprintf fmt "*b\"%s\")}" (string_of_init (il))
             )
           else
             (
@@ -287,6 +290,12 @@ let rec print_expr fmt e =
       )
     | (Ctypes.Tint(_, _, _), Ctypes.Tpointer(_, _)) -> (
         handle_ptr_arithmetic fmt op_type e2 e1
+      )
+    | (Ctypes.Tlong(_, _), Ctypes.Tpointer(_, _)) -> (
+        handle_ptr_arithmetic fmt op_type e2 e1
+      )
+    | (Ctypes.Tpointer(_, _), Ctypes.Tlong(_, _)) -> (
+        handle_ptr_arithmetic fmt op_type e1 e2
       )
     | (_, _) ->
     (
@@ -347,7 +356,10 @@ let rec print_expr fmt e =
     | (b1, b2) -> (
       match (e_ty, ty) with
       (* TODO go back in rustlight and make sure it's not a wild cast... *)
-      | (Ctypes.Tarray(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a).as_mut_ptr()" print_expr exp
+      | (Ctypes.Tarray(_ty_from, _, _), Ctypes.Tpointer(_ty_to, _))
+        (* -> fprintf fmt "((%a).as_mut_ptr() as %s)" print_expr exp (gen_ty_rust false ty) *)
+        -> fprintf fmt "(%a).as_mut_ptr()" print_expr exp
+             (* (gen_ty_rust false _ty_from) (gen_ty_rust false _ty_to) *)
       | (Ctypes.Tfunction(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
       | (Ctypes.Tstruct(a, _), Ctypes.Tstruct(b, _)) ->
         if a == b then fprintf fmt "%a" print_expr exp

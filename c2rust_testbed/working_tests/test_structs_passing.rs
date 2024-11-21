@@ -1,4 +1,3 @@
-const BUFFER_SIZE: usize = 9;
 use libc::{c_int, c_uint, size_t};
 use rust_project::structs::{
     alignment_entry,

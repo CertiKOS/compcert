@@ -1,4 +1,5 @@
 Require Import Ctypes.
+Require Import ZArith.
 Require Import Floats.
 Require Import Maps.
 Require Import Axioms Coqlib.
@@ -33,7 +34,7 @@ Print Ctypes.prog_public.
 (* - slides: what am I doing about structs that don't fully initialize. *)
 (* - slides: alignof and sizeof signatures TODO do they match? also have to use generics*)
 
-Notation "x |> f" := (f x) (at level 50, left associativity).
+(* Notation "x |> f" := (f x) (at level 50, left associativity). *)
 
 
 Definition m2m {A: Type} (m: res A) : SimplExpr.mon A :=
@@ -286,12 +287,43 @@ Definition gen_cast_for_conditional
   | ty => SimplExpr.error (msg (String.append " Expected scalar or pointer type in condition. Got unexpected type: " (type_to_string ty)))
   end.
 
+Fixpoint i2etc_measure (t : type) : nat :=
+  match t with
+  | Ctypes.Tarray ty_from _ _ => 1 + (i2etc_measure ty_from)
+  | _ => 0
+  end.
+
+Print type.
+
+Fixpoint nuke_equalities (e: rexpr) : rexpr :=
+  match e with
+  | Econst_int _ _ => e
+  | Econst_float _ _ => e
+  | Econst_single _ _ => e
+  | Econst_long _ _ => e
+  | Evar _ _ => e
+  | Etempvar _ _ => e
+  | Ederef e' ty => Ederef (nuke_equalities e') ty
+  | Eaddrof e' ty => Eaddrof (nuke_equalities e') ty
+  | Eunop op e' ty => Eunop op (nuke_equalities e') ty
+  | Ebinop op e' e'' ty => Ebinop op (nuke_equalities e') (nuke_equalities e'') ty
+  | Ecast e' ty => if type_eq (r_typeof e') ty then e' else e
+  (* | Ecast e' ty => e *)
+  | Efield e' id ty => Efield (nuke_equalities e') id ty
+  | Esizeof _ _ => e
+  | Ealignof _ _ => e
+  | Eif_then_else e' e'' e''' ty =>
+      Eif_then_else (nuke_equalities e') (nuke_equalities e'') (nuke_equalities e''') ty
+  | Enull_check e' => Enull_check (nuke_equalities e')
+  end.
+
 (* this does general type coersions*)
 (* "implict to explicit type coersion" *)
 Definition i2etc
   (cur_type: type)
   (desired_type: type)
   (expr: rexpr)
+  (* {measure i2etc_measure cur_type} *)
   : SimplExpr.mon rexpr
   :=
   match (cur_type, desired_type) with
@@ -313,8 +345,25 @@ Definition i2etc
       SimplExpr.ret (Ecast (Ecast expr (Ctypes.Tint I8 Unsigned a)) desired_type)
   | (Ctypes.Tint IBool _ a, Ctypes.Tfloat F64 _) =>
       SimplExpr.ret (Ecast (Ecast expr (Ctypes.Tint I8 Unsigned a)) desired_type)
-  | (_, _) => SimplExpr.ret (Ecast expr desired_type)
+  (* handle pointer decay. In rust this is done by going from an array type to a pointer type *)
+  (* this is the decay part *)
+  (* then directly casting from the nested array type to a pointer type*)
+  | (Ctypes.Tarray ty_from _len _attrs, Ctypes.Tpointer ty_to _attrs') =>
+      let new_ty := Ctypes.Tpointer ty_from _attrs in
+      let casted := Ecast expr new_ty in
+      SimplExpr.ret(Ecast casted desired_type)
+      (* i2etc new_ty desired_type casted *)
+  | (a, b) =>
+       SimplExpr.ret(Ecast expr desired_type)
   end.
+(* Proof. *)
+(*   intros cur_type desired_type expr ty_from _len _attrs teq ty_to _attrs' teq0. *)
+(*   destruct (type_eq cur_type desired_type) eqn:E ; cbn; lia. *)
+(* Qed. *)
+
+(* Print i2etc_terminate. *)
+
+
 
 (* there's a little bit of overlap with implicit_to_explicit_type_conversion *)
 (* but fundamentally this decides what type coersion needs to be done *)
@@ -415,19 +464,18 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : SimplExpr
   | Clight.Evar id ty =>
       gdom _ <- check_ty ty;
       let res := Evar id ty in
-      match ty with
+      SimplExpr.ret(match ty with
       | Tarray ty' _ a => Ecast res (Tpointer ty' a)
       | _ => res
-      end |>
-      SimplExpr.ret
+      end)
   | Clight.Etempvar id ty =>
       gdom _ <- check_ty ty;
       let res := Etempvar id ty in
-      match ty with
+      SimplExpr.ret(match ty with
       | Tarray ty' _ a => Ecast res (Tpointer ty' a)
       | _ => res
-      end |>
-      SimplExpr.ret
+      end)
+
   | Clight.Ederef b ty =>
       gdom _ <- check_ty ty;
       gdo tb <- transl_expr ce b;
@@ -618,20 +666,23 @@ Fixpoint transl_statement
           gdo r_lval <- transl_expr ce lval;
           gdo r_rval <- transl_expr ce rval;
           gdo coerced_type <- i2etc (r_typeof r_rval) (r_typeof r_lval) (r_rval) ;
+          let s := nuke_equalities coerced_type in
           (* sometimes the types do not match *)
-          SimplExpr.ret (S_assign r_lval coerced_type)
+          SimplExpr.ret (S_assign r_lval s)
         (* SimplExpr.ret r_val *)
     | Clight.Sifthenelse exp s1 s2 =>
         gdo cond <- transl_expr ce exp;
         gdo casted_cond <- gen_cast_for_conditional cond;
+        let s_cond := nuke_equalities casted_cond in
         gdo r_s1 <- transl_statement md s1;
         gdo r_s2 <- transl_statement md s2;
-        SimplExpr.ret (S_if_then_else casted_cond r_s1 r_s2)
+        SimplExpr.ret (S_if_then_else s_cond r_s1 r_s2)
     | Clight.Sset x exp =>
         gdo r_exp <- transl_expr ce exp;
         gdom expected_type <- get_var_type x;
         gdo casted_exp <- i2etc (r_typeof r_exp) expected_type r_exp ;
-        SimplExpr.ret (S_set x casted_exp)
+        let s_casted_exp := nuke_equalities casted_exp in
+        SimplExpr.ret (S_set x s_casted_exp)
     | Clight.Ssequence exp1 exp2 =>
         gdo r_exp1 <- transl_statement md exp1;
         gdo r_exp2 <- transl_statement md exp2;
@@ -641,7 +692,8 @@ Fixpoint transl_statement
         let exp_ty := Clight.typeof exp in
         gdo r_exp <- transl_expr ce exp;
         gdo casted_exp <- i2etc exp_ty f_rty r_exp ;
-        SimplExpr.ret (S_return (Some (casted_exp, exp_ty)))
+        let s_casted_exp := nuke_equalities casted_exp in
+        SimplExpr.ret (S_return (Some (s_casted_exp, exp_ty)))
     | Clight.Sswitch exp stmts =>
       let exp_typ := Clight.typeof exp in
       let dflt_case_ty := Ctypes.Tint IBool Signed noattr in
