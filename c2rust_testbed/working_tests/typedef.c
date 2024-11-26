@@ -10,7 +10,7 @@ int identity(int x) { return x; }
 
 // The qualifiers should still be extracted from typedefs when needed (for example at binding
 // sites)
-int entry(void)
+int entry_typedef(void)
 {
     my_int x = 1;                            // 'mut x: my_int'
     my_int const y = 1;                      // 'y: my_int'
@@ -18,7 +18,7 @@ int entry(void)
     const_int_ptr w = &x;                    // 'w: const_int_ptr'
     const const_int_ptr v = &x;              // 'v: const_int_ptr'
     indirectly_const_ptr u = &x;             // 'u: indirectly_const_ptr'
-    my_fn *t = &identity;                    // 't: my_fn: fn(libc::c_int) -> libc::c_int' 
+    my_fn *t = &identity;                    // 't: my_fn: fn(libc::c_int) -> libc::c_int'
 
     typedef int shadowed;
     shadowed n = 1;

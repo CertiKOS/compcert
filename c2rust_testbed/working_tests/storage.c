@@ -37,7 +37,7 @@ static char const ab_month_name[12][4] =
 };
 static const char *hello = "hello";
 
-void entry(const unsigned buffer_size, int buffer[]) {
+void entry_storage(const unsigned buffer_size, int buffer[]) {
 
     if (buffer_size < 11) return;
     static const char *world = "world";

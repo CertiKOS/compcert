@@ -116,6 +116,9 @@ Definition r_typeof (e: rexpr) : type :=
   | Enull_check _ => Ctypes.Tint Ctypes.IBool Signed noattr
   end.
 
+Print sum.
+
+
 Definition void_pointer_int (ty: Ctypes.type) := Econst_int (Int.repr 0) ty.
 (* Definition void_pointer (ty: Ctypes.type) := Eaddr_of () (Ctypes.Tpointer Ctypes.Tvoid noattr) *)
 
@@ -174,7 +177,7 @@ Inductive rstatement: Type :=
   | S_skip : rstatement
   (* no let. That is a = b; *)
   | S_assign : rexpr -> rexpr -> rstatement
-  (* a = b;*)
+  (* a = b; ONLY for tempvars *)
   | S_set : ident -> rexpr -> rstatement
   (* assigned_var_name -> fn_name -> args -> statement *)
   | S_call: option ident -> rexpr -> list rexpr -> rstatement
@@ -215,6 +218,169 @@ Record r_function : Type := mkrfunction {
   fn_is_safe: bool;
 }.
 
+Print sum.
+
+(* we are being very conservative here. That's fine. *)
+Definition expr_should_be_split (e: rexpr) : bool :=
+  match e with
+  | Econst_int n ty => true
+  | Econst_float f ty => true
+  | Econst_single f32 ty => true
+  | Econst_long l ty => true
+  | Evar id ty =>
+      match ty with
+      | Ctypes.Tfunction _ _ _=> true
+      | _ => false
+      end
+  | Etempvar id ty =>
+      match ty with
+      | Ctypes.Tfunction _ _ _ => true
+      | _ => false
+      end
+  (* a reborrow is usually fine, but we want to be conservative *)
+  | Ederef e1 ty =>  true
+  | Eunop op e1 ty => true
+  | Ebinop op e1 e2 ty => true
+  | Ecast e1 ty => true
+  | Efield e1 id ty => true
+  | Esizeof t1 ty => true
+  | Ealignof t1 ty => true
+  | Eif_then_else cond e_then e_else ty => true
+  | Enull_check e1 => true
+  | Eaddrof e1 ty => true
+  end.
+
+(* in order to reflect move semantics, sometimes we may need to split expressions based
+   on the expression contents. *)
+Fixpoint split_expr (e: rexpr) {struct e} : SimplExpr.mon (sum rexpr ((rstatement) * rexpr)) :=
+  (* TODO separate out into a function. so much repeated code... *)
+  match e with
+  | Econst_int n ty => SimplExpr.ret( inr (S_skip, e))
+  | Econst_float f ty => SimplExpr.ret( inr (S_skip, e))
+  | Econst_single f32 ty => SimplExpr.ret( inr (S_skip, e))
+  | Econst_long l ty => SimplExpr.ret( inr (S_skip, e))
+  | Evar id ty => SimplExpr.ret( inr (S_skip, e))
+  | Etempvar id ty => SimplExpr.ret(  inr (S_skip, e))
+  | Ederef e1 ty =>
+      gdo inner_split <- split_expr e1;
+      match inner_split with
+      | inl _ => SimplExpr.ret( inr (S_skip, e))
+      | inr (stmts, e_final) =>
+          let res := inr (stmts, Ederef e_final ty) in
+          SimplExpr.ret(res)
+      end
+  | Eunop op e1 ty =>
+      gdo inner_split <- split_expr e1;
+      match inner_split with
+      | inl _ => SimplExpr.ret( inr (S_skip, e))
+      | inr (stmts, e_final) =>
+          let res := inr (stmts, Eunop op e_final ty) in
+          SimplExpr.ret(res)
+      end
+  | Ebinop op e1 e2 ty =>
+      gdo inner_split_1 <- split_expr e1;
+      gdo inner_split_2 <- split_expr e2;
+      match (inner_split_1, inner_split_2) with
+      | (inl _, inl _) => SimplExpr.ret( inr (S_skip, e))
+      | (inr (stmts, e_final1), inl _) =>
+          let res := inr (stmts, Ebinop op e_final1 e2 ty) in
+          SimplExpr.ret(res)
+      | (inl _, inr (stmts, e_final2)) =>
+          let res := inr (stmts, Ebinop op e1 e_final2 ty) in
+          SimplExpr.ret(res)
+      | (inr (stmts1, e_final1), inr (stmts2, e_final2)) =>
+          let res := inr (S_sequence stmts1 stmts2, Ebinop op e_final1 e_final2 ty) in
+          SimplExpr.ret(res)
+      end
+
+  | Ecast e1 ty =>
+      gdo inner_split <- split_expr e1;
+      match inner_split with
+      | inl _ => SimplExpr.ret( inr (S_skip, e))
+      | inr (stmts, e_final) =>
+          let res := inr (stmts, Ecast e_final ty) in
+          SimplExpr.ret(res)
+      end
+  | Efield e1 id ty =>
+      gdo inner_split <- split_expr e1;
+      match inner_split with
+      | inl _ => SimplExpr.ret( inr (S_skip, e))
+      | inr (stmts, e_final) =>
+          let res := inr (stmts, Efield e_final id ty) in
+          SimplExpr.ret(res)
+      end
+  | Esizeof t1 ty => SimplExpr.ret( inr (S_skip, e))
+  | Ealignof t1 ty => SimplExpr.ret( inr (S_skip, e))
+  | Eif_then_else cond e_then e_else ty =>
+      gdo split_1 <- split_expr cond;
+      gdo split_2 <- split_expr e_then;
+      gdo split_3 <- split_expr e_else;
+      match (split_1, split_2, split_3) with
+      | (inl _, inl _, inl _) => SimplExpr.ret( inr (S_skip, e))
+      | (inr (stmts1, e1), inl _, inl _) =>
+          let res := inr (stmts1, Eif_then_else e1 e_then e_else ty) in
+          SimplExpr.ret(res)
+      | (inl _, inr (stmts2, e2), inl _) =>
+          let res := inr (stmts2, Eif_then_else cond e2 e_else ty) in
+          SimplExpr.ret(res)
+      | (inl _, inl _, inr (stmts3, e3)) =>
+          let res := inr (stmts3, Eif_then_else cond e_then e3 ty) in
+          SimplExpr.ret(res)
+      | (inl _, inr (stmts2, e2), inr (stmts3, e3)) =>
+          let res := inr (S_sequence stmts2 stmts3, Eif_then_else cond e2 e3 ty) in
+          SimplExpr.ret(res)
+      | (inr (stmts1, e1), inl _, inr (stmts3, e3)) =>
+          let res := inr (S_sequence stmts1 stmts3, Eif_then_else e1 e_then e3 ty) in
+          SimplExpr.ret(res)
+      | (inr (stmts1, e1), inr (stmts2, e2), inl _) =>
+          let res := inr (S_sequence stmts1 stmts2, Eif_then_else e1 e2 e_else ty) in
+          SimplExpr.ret(res)
+      | (inr (stmts1, e1), inr (stmts2, e2), inr (stmts3, e3)) =>
+          let res := inr (S_sequence stmts1 (S_sequence stmts2 stmts3),
+                         Eif_then_else e1 e2 e3 ty) in
+          SimplExpr.ret(res)
+      end
+  | Enull_check e1 =>
+      gdo inner_split <- split_expr e1;
+      match inner_split with
+      | inl _ => SimplExpr.ret( inr (S_skip, e))
+      | inr (stmts, e_final) =>
+          let res := inr (stmts, Enull_check e_final) in
+          SimplExpr.ret(res)
+      end
+  | Eaddrof e1 ty_addrof =>
+      if (expr_should_be_split e1) then
+        let e1_ty := r_typeof e1 in
+        gdo var_ident <- SimplExpr.gensym e1_ty;
+        let var_expr := Etempvar var_ident e1_ty in
+        gdo inner_split <- split_expr e1;
+
+        match inner_split with
+        (* Inner expression doesn't need to be assigned more. *)
+        | inl _ =>
+
+          let assn_stmt := S_set var_ident e1 in
+          let res := (assn_stmt, Eaddrof var_expr ty_addrof) in
+          SimplExpr.ret(inr res)
+        | inr (inner_assns, e_inner_final) =>
+          let assn_stmt := S_set var_ident e_inner_final in
+          let assns := S_sequence inner_assns assn_stmt in
+          let res := (assns, Eaddrof var_expr ty_addrof) in
+          SimplExpr.ret(inr res)
+        end
+      (* turns out we don't need to split the expression *)
+      else SimplExpr.ret (inl e)
+  end.
+
+Definition process_expr (expr_to_split: rexpr) (gen_stmt: rexpr -> rstatement)
+  : SimplExpr.mon rstatement :=
+  gdo the_split <- split_expr expr_to_split;
+  match the_split with
+  | inl e => SimplExpr.ret(gen_stmt e)
+  | inr (stmts, e) =>
+      let stmt := gen_stmt e in
+      SimplExpr.ret(S_sequence stmts stmt)
+  end.
 
 Definition type_to_string (ty: type) : string :=
   match ty with
@@ -295,6 +461,12 @@ Fixpoint i2etc_measure (t : type) : nat :=
 
 Print type.
 
+Definition is_fn_ptr (ty: type) : bool :=
+  match ty with
+  | Tpointer (Tfunction _ _ _) _ => true
+  | _ => false
+  end.
+
 Fixpoint nuke_equalities (e: rexpr) : rexpr :=
   match e with
   | Econst_int _ _ => e
@@ -307,7 +479,10 @@ Fixpoint nuke_equalities (e: rexpr) : rexpr :=
   | Eaddrof e' ty => Eaddrof (nuke_equalities e') ty
   | Eunop op e' ty => Eunop op (nuke_equalities e') ty
   | Ebinop op e' e'' ty => Ebinop op (nuke_equalities e') (nuke_equalities e'') ty
-  | Ecast e' ty => if type_eq (r_typeof e') ty then e' else e
+  | Ecast e' ty =>
+      let not_fn_ptr := negb (is_fn_ptr ty) in
+      let types_match := type_eq (r_typeof e') ty in
+      if andb not_fn_ptr types_match then e' else e
   (* | Ecast e' ty => e *)
   | Efield e' id ty => Efield (nuke_equalities e') id ty
   | Esizeof _ _ => e
@@ -327,7 +502,7 @@ Definition i2etc
   : SimplExpr.mon rexpr
   :=
   match (cur_type, desired_type) with
-  | (Ctypes.Tint IBool _ _, Ctypes.Tint IBool _ _) => SimplExpr.ret expr
+
   | (Ctypes.Tint I8 Signed _, Ctypes.Tint I8 Signed _) => SimplExpr.ret expr
   | (Ctypes.Tint I8 Unsigned _, Ctypes.Tint I8 Unsigned _) => SimplExpr.ret expr
   | (Ctypes.Tint I16 Signed _, Ctypes.Tint I16 Signed _) => SimplExpr.ret expr
@@ -447,6 +622,7 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   end.
 
 (* TODO special case array derefences*)
+(* NOTE: CE is just types *)
 Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : SimplExpr.mon (rexpr) :=
   match a with
   | Clight.Econst_int n ty =>
@@ -667,8 +843,9 @@ Fixpoint transl_statement
           gdo r_rval <- transl_expr ce rval;
           gdo coerced_type <- i2etc (r_typeof r_rval) (r_typeof r_lval) (r_rval) ;
           let s := nuke_equalities coerced_type in
+          let gen_res := fun (e: rexpr) => S_assign r_lval e in
+          process_expr s gen_res
           (* sometimes the types do not match *)
-          SimplExpr.ret (S_assign r_lval s)
         (* SimplExpr.ret r_val *)
     | Clight.Sifthenelse exp s1 s2 =>
         gdo cond <- transl_expr ce exp;
@@ -676,13 +853,15 @@ Fixpoint transl_statement
         let s_cond := nuke_equalities casted_cond in
         gdo r_s1 <- transl_statement md s1;
         gdo r_s2 <- transl_statement md s2;
-        SimplExpr.ret (S_if_then_else s_cond r_s1 r_s2)
+        let gen_res := fun (e: rexpr) => S_if_then_else e r_s1 r_s2 in
+        process_expr s_cond gen_res
     | Clight.Sset x exp =>
         gdo r_exp <- transl_expr ce exp;
         gdom expected_type <- get_var_type x;
         gdo casted_exp <- i2etc (r_typeof r_exp) expected_type r_exp ;
         let s_casted_exp := nuke_equalities casted_exp in
-        SimplExpr.ret (S_set x s_casted_exp)
+        let gen_res := fun (e: rexpr) => S_set x e in
+        process_expr s_casted_exp gen_res
     | Clight.Ssequence exp1 exp2 =>
         gdo r_exp1 <- transl_statement md exp1;
         gdo r_exp2 <- transl_statement md exp2;
@@ -693,7 +872,9 @@ Fixpoint transl_statement
         gdo r_exp <- transl_expr ce exp;
         gdo casted_exp <- i2etc exp_ty f_rty r_exp ;
         let s_casted_exp := nuke_equalities casted_exp in
-        SimplExpr.ret (S_return (Some (s_casted_exp, exp_ty)))
+        let gen_res := fun (e: rexpr) => S_return (Some (e, exp_ty)) in
+        process_expr s_casted_exp gen_res
+    (* TODO still need to handle casting and splitting expressions for this case *)
     | Clight.Sswitch exp stmts =>
       let exp_typ := Clight.typeof exp in
       let dflt_case_ty := Ctypes.Tint IBool Signed noattr in
@@ -750,7 +931,7 @@ Fixpoint transl_statement
         gdo name' <- transl_expr ce name ;
         gdo al' <- transl_arglist ce al ;
         SimplExpr.ret (S_call x name' al')
-    | Clight.Sbuiltin x ef tyargs bl => SimplExpr.ret (S_skip)
+    | Clight.Sbuiltin x ef tyargs bl => SimplExpr.error(msg "INVALID BUILTIN")
     | Clight.Sloop s1 s2 =>
         let loop_lbl :=
           match next_lbl with
@@ -774,8 +955,8 @@ Fixpoint transl_statement
         SimplExpr.ret (S_loop loop_lbl r_s1 r_s2)
     | Clight.Sbreak => SimplExpr.ret (S_break cur_switch_lbl)
     | Clight.Scontinue => SimplExpr.ret (S_continue cur_loop_lbl)
-    | Clight.Slabel lbl s => SimplExpr.ret (S_skip)
-    | Clight.Sgoto lbl => SimplExpr.ret (S_skip)
+    | Clight.Slabel lbl s => SimplExpr.error (msg "INVALID BUILTIN")
+    | Clight.Sgoto lbl => SimplExpr.error (msg "INVALID BUILTIN")
   end
 end
 with transl_switch
@@ -1084,13 +1265,14 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
   match body with
   | SimplExpr.Err msg => Error msg
   | SimplExpr.Res r_body r_g i =>
+      let tmp_vars := r_g.(SimplExpr.gen_trail) in
       let cc := Clight.fn_callconv f in
       match cc.(AST.cc_vararg) with
       (* variadic. _n means # of fixed args *)
       | Some _n => Error(msg "Variadics are currently unsupported when converting to rust")
       (* not variadic *)
       | None => (
-          let in_scope_symbols := (map fst f.(Clight.fn_vars)) ++ (map fst f.(Clight.fn_params)) ++ (map fst f.(Clight.fn_temps)) ++ glob_syms in
+          let in_scope_symbols := (map fst f.(Clight.fn_vars)) ++ (map fst f.(Clight.fn_params)) ++ (map fst tmp_vars) ++ glob_syms in
           let in_scope_symbols_tree := fold_left (fun (acc : PTree.t unit) (elt: ident) => PTree.set elt tt acc)
                                          in_scope_symbols (PTree.empty _) in
           let len := List.length in_scope_symbols in

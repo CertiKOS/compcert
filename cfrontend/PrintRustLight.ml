@@ -3,6 +3,7 @@ open! Ctypes
 open AST
 open Camlcoq (*for extern_atom*)
 open RustLight
+exception Panic of string
 
 (* HACK the proper solution is to add to this map in process_c *)
 let extern_atom_r a =
@@ -162,7 +163,7 @@ let print_primitive_init fmt = function
   | Init_int8 n -> fprintf fmt"%ld" (camlint_of_coqint n)
   | Init_int16 n -> fprintf fmt "%ld" (camlint_of_coqint n)
   | Init_int32 n -> fprintf fmt "%ld" (camlint_of_coqint n)
-  | Init_int64 n -> fprintf fmt "%LdLL" (camlint64_of_coqint n)
+  | Init_int64 n -> fprintf fmt "%Ld" (camlint64_of_coqint n)
   | Init_float32 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_float64 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_space n -> fprintf fmt "/* skip %s */@ " (Z.to_string n)
@@ -170,21 +171,98 @@ let print_primitive_init fmt = function
   (* TODO *)
   (* - try with rust nightly and the new pointer type *)
   (* - copy c2rust *)
-  | Init_addrof(symb, ofs) -> fprintf fmt "UNIMPLEMENTED!" (* TODO *)
+  | Init_addrof(symb, ofs) ->
+    (* analogue to PrintCsyntax.ml:474 *)
+    let ofs = camlint_of_coqint ofs in
+    if ofs = 0l
+    then fprintf fmt "std::ptr::addr_of_mut! { %s }" (extern_atom symb)
+    else fprintf fmt "(std::ptr::addr_of_mut! { %s }).add(%ld)" (extern_atom symb) ofs
 
 let re_string_literal = Str.regexp "__stringlit_[0-9]+"
 
-let print_composite_init fmt arr =
-  fprintf fmt "[@ ";
-  List.iter
-    (
-      fun i ->
-        print_primitive_init fmt i;
-        match i with
-        | Init_space _ -> ()
-        | _ -> fprintf fmt ",@ "
-    ) arr;
-  fprintf fmt "]"
+(* TODO fix this. It's horribly inefficient *)
+let rec find_comp_defn (tds: composite_definition list) id =
+  match tds with
+  | Composite(id_c, _su, m, a) :: l ->
+    if id_c = id then Composite(id, _su, m, a) else find_comp_defn l id
+  | nil -> raise (Panic "Couldn't find type")
+
+
+
+let rec print_composite_init fmt tds arr ty =
+  (*TODO both cases do the same thing. Make it more dry *)
+  match ty with
+  | Ctypes.Tstruct(id, _attrs) ->
+    fprintf fmt "%s {" (extern_atom_r id);
+    let Composite(_, _, membs, _attrs) = find_comp_defn tds id in
+    let res = List.fold_left (fun acc memb ->
+        match memb with
+        | Member_plain(id_memb, ty_memb) -> (
+          fprintf fmt "%s: " (extern_atom_r id_memb);
+          let arr_res = print_composite_init fmt tds arr ty_memb in
+          fprintf fmt ",";
+          arr_res
+        )
+        | Member_bitfield(_) -> raise (Panic "Don't support bitfields yet")
+      ) arr membs in
+    fprintf fmt "}";
+    res
+  | Ctypes.Tunion(id, _attrs) ->
+    fprintf fmt "%s {" (extern_atom_r id);
+    let Composite(_, _, membs, _attrs) = find_comp_defn tds id in
+    let res = List.fold_left (fun acc memb ->
+        match memb with
+        | Member_plain(id_memb, ty_memb) -> (
+          fprintf fmt "%s: " (extern_atom_r id_memb);
+          let arr_res = print_composite_init fmt tds arr ty_memb in
+          fprintf fmt ",";
+          arr_res
+        )
+        | Member_bitfield(_) -> raise (Panic "Don't support bitfields yet")
+      ) arr membs in
+    fprintf fmt "}";
+    res
+  | Ctypes.Tarray(ty_inner, num, _attrs) -> (
+      fprintf fmt "[";
+
+      let res =
+      List.fold_left (fun acc _ ->
+          let res = print_composite_init fmt tds acc ty_inner in
+          fprintf fmt ", ";
+          res
+      ) arr (List.init (camlint_of_coqint num |> Int32.to_int) (fun x -> x)) in
+      fprintf fmt "]";
+      res
+    )
+  | _ -> (
+      match arr with
+      | ele :: l -> fprintf fmt "("; print_primitive_init fmt ele; fprintf fmt " as %s)" (gen_ty_rust false ty); l
+      | nil -> raise (Panic "Ran out of elements in array")
+  )
+
+  (* match maybe_name with *)
+  (* | Some name -> *)
+  (*   fprintf fmt "%s {@ " name; *)
+  (*   List.iter *)
+  (*     ( *)
+  (*       fun i -> *)
+  (*         print_primitive_init fmt i; *)
+  (*         match i with *)
+  (*         | Init_space _ -> () *)
+  (*         | _ -> fprintf fmt ",@ " *)
+  (*     ) arr; *)
+  (*   fprintf fmt "}" *)
+  (* | None -> *)
+  (*   fprintf fmt "[@ "; *)
+  (*   List.iter *)
+  (*     ( *)
+  (*       fun i -> *)
+  (*         print_primitive_init fmt i; *)
+  (*         match i with *)
+  (*         | Init_space _ -> () *)
+  (*         | _ -> fprintf fmt ",@ " *)
+  (*     ) arr; *)
+  (*   fprintf fmt "]" *)
 
 let string_of_init id =
   let b = Buffer.create (List.length id) in
@@ -200,7 +278,7 @@ let string_of_init id =
       assert false
   in List.iter add_init id; Buffer.contents b
 
-let print_globvar fmt id v =
+let print_globvar fmt tds id v =
   let name_bare = extern_atom_r id in
   let linkage = if C2C.atom_is_static id then "" else "pub " in
   (* need to do static analysis pass to conclude that this is actually static mut *)
@@ -216,13 +294,13 @@ let print_globvar fmt id v =
   (* so this is a noop *)
   | [] -> ()
   | [Init_space _] ->
-    fprintf fmt "%s; @ @ " (gen_name_and_ty_rust name v.gvar_info)
+    fprintf fmt "%s = unsafe { std::mem::zeroed() }; @ @ " (gen_name_and_ty_rust name v.gvar_info)
   | _ ->
     begin match v.gvar_info, v.gvar_init with
       | (Ctypes.Tint _ | Ctypes.Tlong _ | Ctypes.Tfloat _ | Tpointer _ | Tfunction _),
         [i1] ->
-          fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name v.gvar_info);
-          print_primitive_init fmt i1
+          fprintf fmt "@[<hov 2>%s = unsafe {(" (gen_name_and_ty_rust name v.gvar_info);
+          print_primitive_init fmt i1; fprintf fmt " as %s) }" (gen_ty_rust false v.gvar_info)
       | _, il ->
           if Str.string_match re_string_literal (extern_atom_r id) 0
           && List.for_all (function Init_int8 _ -> true | _ -> false) il
@@ -231,13 +309,20 @@ let print_globvar fmt id v =
               (* dereference here because string literals are pointers to byte arrays  *)
               (* transmute here because the literal isn't the expected type. In C it's signed and in rust it's unsigned *)
               (* We're black boxing the entire thing and just saying "this is what we expect it to be"  *)
-              fprintf fmt "@[<hov 2>%s = unsafe { std::mem::transmute(" (gen_name_and_ty_rust name v.gvar_info);
+              fprintf fmt "@[<hov 2>%s = unsafe { std::mem::transmute("
+                (gen_name_and_ty_rust name v.gvar_info);
               fprintf fmt "*b\"%s\")}" (string_of_init (il))
             )
           else
             (
-              fprintf fmt "@[<hov 2>%s = " (gen_name_and_ty_rust name v.gvar_info);
-              print_composite_init fmt il
+              fprintf fmt "@[<hov 2>%s = unsafe { " (gen_name_and_ty_rust name v.gvar_info);
+              (* let maybe_struct_name = *)
+              (* match g.var_info with *)
+              (* | Ctypes.Tstruct(_, _) => *)
+              (* | Ctypes.Tstruct(_, _) => *)
+              (* in *)
+              let _ = print_composite_init fmt tds il v.gvar_info in
+              fprintf fmt " }"
             )
     end;
   fprintf fmt ";@]@ @ "
@@ -507,8 +592,25 @@ let print_function fmt id fn =
   (* In C we just reserve on the stack *)
   (* In Rust to avoid compilation errors we need the entire struct to be initialized before first use. *)
   (* We translate to that directly *)
-  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s = std::mem::zeroed();@ " (gen_name_and_ty_rust (extern_atom_r vid) vty) ) fn.fn_vars;
-  List.iter (fun (vid, vty) -> fprintf fmt "let mut %s = std::mem::zeroed();@ " (gen_name_and_ty_rust (temp_name vid) vty) ) fn.fn_temps;
+  List.iter (fun (vid, vty) ->
+      (* TODO can make this dryer *)
+      (* initialized functions can only come from temporary variables *)
+      (* so it's fine to not initialize them because they will be written to*)
+      (* everything else will be initialized and valid *)
+      let zero_initialize =
+      match vty with
+      | Ctypes.Tfunction(_, _, _) -> ""
+      | _ -> " = std::mem::zeroed()"
+      in
+      fprintf fmt "let mut %s%s;@ "
+        (gen_name_and_ty_rust (extern_atom_r vid) vty) zero_initialize ) fn.fn_vars;
+  List.iter (fun (vid, vty) ->
+      let zero_initialize =
+      match vty with
+      | Ctypes.Tfunction(_, _, _) -> ""
+      | _ -> " = std::mem::zeroed()"
+      in
+      fprintf fmt "let mut %s%s;@ " (gen_name_and_ty_rust (temp_name vid) vty) zero_initialize) fn.fn_temps;
 
   print_stmt fmt fn.fn_body;
 
@@ -520,10 +622,10 @@ let print_fundef fmt id fundef =
   | Ctypes.External(_, _, _, _) ->  fprintf fmt ""
 
 
-let print_globdef fmt (id, gd) =
+let print_globdef fmt tds (id, gd) =
   match gd with
   | Gfun fundef -> print_fundef fmt id fundef
-  | Gvar v -> print_globvar fmt id v
+  | Gvar v -> print_globvar fmt tds id v
 
 let struct_or_union = function Struct -> "struct" | Union -> "union"
 
@@ -664,7 +766,8 @@ let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_i
       ) import_map;
   fprintf fmt "@;"
 
-let print_program (sym_mapping: (string, string) Hashtbl.t) composite_mapping mod_name f (prog: RustLight.r_program) =
+let print_program (sym_mapping: (string, string) Hashtbl.t)
+    composite_mapping mod_name f (prog: RustLight.r_program) =
   let [@warning "-42"] p_defs = prog.prog_defs in
   let [@warning "-42"] p_types = prog.prog_types in
 
@@ -682,7 +785,7 @@ let print_program (sym_mapping: (string, string) Hashtbl.t) composite_mapping mo
     in_module_composite_dfns;
 
   List.iter (define_composite f) in_module_composite_dfns;
-  List.iter (print_globdef f) p_defs;
+  List.iter (print_globdef f p_types) p_defs;
   fprintf f "@]@."
 
 let change_directory dir_name =

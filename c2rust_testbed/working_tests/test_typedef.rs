@@ -1,0 +1,21 @@
+use rust_project::typedef::entry_typedef;
+
+use libc::c_int;
+
+#[test]
+pub fn test_typedef() {
+    let ret = unsafe { entry_typedef() };
+    assert_eq!(ret, 0);
+
+    // TODO the type resolution nukes the type.
+    //let mut rust_var: my_int = 5;
+    //let mut c_var: c_int = 5;
+    //assert_eq!(rust_var, c_var);
+    //
+    //let rptr_var: int_ptr = &mut rust_var as *mut my_int;
+    //let cptr_var: int_ptr = &mut c_var as *mut c_int;
+    //
+    //unsafe {
+    //    assert_eq!(*rptr_var, *cptr_var);
+    //}
+}
