@@ -539,7 +539,6 @@ Definition i2etc
 (* Print i2etc_terminate. *)
 
 
-
 (* there's a little bit of overlap with implicit_to_explicit_type_conversion *)
 (* but fundamentally this decides what type coersion needs to be done *)
 (* note: I can't just get away with using the resulting type and casting to that. *)
@@ -614,16 +613,36 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   (* float and double <-> long *)
   | (Ctypes.Tlong _ _, Ctypes.Tfloat _ _) => first_to_second
   | (Ctypes.Tfloat _ _, Ctypes.Tlong _ _) => second_to_first
-  | (_, _) => NC_neither t1
-
   (* array <-> pointer *)
 
-  (* | (Tarray _ _ _, Tint _ _ _) => neither *)
+  (* TODO not dry *)
+  (* TODO may need to also cast the float or whatever to integer *)
+  | (Ctypes.Tarray ty_inner _num attr, Ctypes.Tfloat _ _) =>
+      let target_ty := Ctypes.Tpointer ty_inner attr in
+      NC_first (i2etc t1 target_ty) target_ty
+  | (Ctypes.Tarray ty_inner _num attr, Ctypes.Tint _ _ _) =>
+      let target_ty := Ctypes.Tpointer ty_inner attr in
+      NC_first (i2etc t1 target_ty) target_ty
+  | (Ctypes.Tarray ty_inner _num attr, Ctypes.Tlong _ _) =>
+      let target_ty := Ctypes.Tpointer ty_inner attr in
+      NC_first (i2etc t1 target_ty) target_ty
+
+  | ( Ctypes.Tfloat _ _, Ctypes.Tarray ty_inner _num attr) =>
+      let target_ty := Ctypes.Tpointer ty_inner attr in
+      NC_second (i2etc t2 target_ty) target_ty
+  | ( Ctypes.Tint _ _ _, Ctypes.Tarray ty_inner _num attr) =>
+      let target_ty := Ctypes.Tpointer ty_inner attr in
+      NC_second (i2etc t2 target_ty) target_ty
+  | ( Ctypes.Tlong _ _ , Ctypes.Tarray ty_inner _num attr) =>
+      let target_ty := Ctypes.Tpointer ty_inner attr in
+      NC_second (i2etc t2 target_ty) target_ty
+
+  | (_, _) => NC_neither t1
   end.
 
-(* TODO special case array derefences*)
 (* NOTE: CE is just types *)
-Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a} : SimplExpr.mon (rexpr) :=
+Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
+  : SimplExpr.mon (rexpr) :=
   match a with
   | Clight.Econst_int n ty =>
       gdom _ <- check_ty ty;
@@ -815,9 +834,39 @@ Fixpoint transl_arglist
   | a1 :: a2 =>
       gdo arg <- transl_expr ce a1 ;
       gdo args <- transl_arglist ce a2 ;
-      SimplExpr.ret(arg :: args)
-  end
-.
+      SimplExpr.ret((Ecast arg bang_type):: args)
+  end.
+
+
+Print typelist.
+
+Fixpoint transl_arglist_with_ty_info
+  (ce: composite_env)
+  (al: list Clight.expr)
+  (tyl: typelist)
+  {struct al}:
+  SimplExpr.mon (list rexpr) :=
+  match al with
+  | nil => SimplExpr.ret(nil)
+  | a1 :: a2 =>
+      match tyl with
+      | Tnil =>
+        (
+          gdo arg <- transl_expr ce a1 ;
+          gdo args <- transl_arglist_with_ty_info ce a2 Tnil ;
+          SimplExpr.ret(arg :: args)
+        )
+      | Tcons ty tyl' =>
+      (
+          gdo arg <- transl_expr ce a1 ;
+          gdo casted_arg <- i2etc (r_typeof arg) ty arg ;
+          gdo args <- transl_arglist_with_ty_info ce a2 tyl';
+          SimplExpr.ret(casted_arg :: args)
+      )
+      end
+  end.
+
+Print typelist.
 
 Fixpoint transl_statement
   (md : s_md)
@@ -929,8 +978,18 @@ Fixpoint transl_statement
       SimplExpr.ret (S_sequence (S_sequence dflt_case_decl exp_decl) new_loop)
     | Clight.Scall x name al =>
         gdo name' <- transl_expr ce name ;
-        gdo al' <- transl_arglist ce al ;
-        SimplExpr.ret (S_call x name' al')
+        match r_typeof name' with
+        | Tfunction tyl t cc =>
+          (
+            gdo al' <- transl_arglist_with_ty_info ce al tyl;
+            SimplExpr.ret (S_call x name' al')
+          )
+        | _ =>
+          (
+            gdo al' <- transl_arglist ce al ;
+            SimplExpr.ret (S_call x name' al')
+          )
+        end
     | Clight.Sbuiltin x ef tyargs bl => SimplExpr.error(msg "INVALID BUILTIN")
     | Clight.Sloop s1 s2 =>
         let loop_lbl :=

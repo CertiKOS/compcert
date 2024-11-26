@@ -2,7 +2,14 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-extern uint32_t SOME_INTS[];
+struct foobar {
+  int x;
+  int y;
+};
+
+struct foobar myfoobars[10] = {0};
+
+uint32_t SOME_INTS[10] = {0};
 
 bool check_some_ints(void) {
         return SOME_INTS[0] == 2

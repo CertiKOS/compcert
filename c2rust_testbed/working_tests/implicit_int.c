@@ -5,7 +5,7 @@
 // https://github.com/GaloisInc/C2Rust/issues/32
 typedef int (my_fn)(int i);
 
-int identity(x)
+int identity2(x)
 {
     return x;
 }
@@ -13,8 +13,8 @@ int identity(x)
 void implicit_int(void)
 {
     // assign to t using the address-of operator
-    my_fn *t = &identity;                    // 't: my_fn: fn(libc::c_int) -> libc::c_int'
+    my_fn *t = &identity2;                    // 't: my_fn: fn(libc::c_int) -> libc::c_int'
     // assign to u using function to pointer decay
-    my_fn *u = identity;                    // 't: my_fn: fn(libc::c_int) -> libc::c_int'
+    my_fn *u = identity2;                    // 't: my_fn: fn(libc::c_int) -> libc::c_int'
 }
 

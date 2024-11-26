@@ -2,7 +2,7 @@
 
 typedef unsigned long* ulp;
 
-ulp foo(void) {
+ulp foo2(void) {
     return NULL;
 }
 
@@ -24,5 +24,5 @@ void entry14(const unsigned int buffer_size, int buffer[]) {
     // GH #89: Previously a null ptr return value would cause a
     // typedef'd pointer type to cause the function to silently
     // not generate any definition
-    foo();
+    foo2();
 }

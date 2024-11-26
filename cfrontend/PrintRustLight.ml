@@ -159,14 +159,14 @@ let map_to_unsigned =
 
 let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust false ty)
 
-let print_primitive_init fmt = function
+let print_primitive_init fmt ty = function
   | Init_int8 n -> fprintf fmt"%ld" (camlint_of_coqint n)
   | Init_int16 n -> fprintf fmt "%ld" (camlint_of_coqint n)
   | Init_int32 n -> fprintf fmt "%ld" (camlint_of_coqint n)
   | Init_int64 n -> fprintf fmt "%Ld" (camlint64_of_coqint n)
   | Init_float32 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_float64 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
-  | Init_space n -> fprintf fmt "/* skip %s */@ " (Z.to_string n)
+  | Init_space n -> fprintf fmt "(0 as %s)" (gen_ty_rust false ty)
   (* this is hard because in the case of globals, the addr_of!  does not work. *)
   (* TODO *)
   (* - try with rust nightly and the new pointer type *)
@@ -236,8 +236,8 @@ let rec print_composite_init fmt tds arr ty =
     )
   | _ -> (
       match arr with
-      | ele :: l -> fprintf fmt "("; print_primitive_init fmt ele; fprintf fmt " as %s)" (gen_ty_rust false ty); l
-      | nil -> raise (Panic "Ran out of elements in array")
+      | ele :: l -> fprintf fmt "("; print_primitive_init fmt ty ele; fprintf fmt " as %s)" (gen_ty_rust false ty); l
+      | nil -> fprintf fmt "(0 as %s)" (gen_ty_rust false ty); nil
   )
 
   (* match maybe_name with *)
@@ -300,7 +300,7 @@ let print_globvar fmt tds id v =
       | (Ctypes.Tint _ | Ctypes.Tlong _ | Ctypes.Tfloat _ | Tpointer _ | Tfunction _),
         [i1] ->
           fprintf fmt "@[<hov 2>%s = unsafe {(" (gen_name_and_ty_rust name v.gvar_info);
-          print_primitive_init fmt i1; fprintf fmt " as %s) }" (gen_ty_rust false v.gvar_info)
+          print_primitive_init fmt v.gvar_info i1; fprintf fmt " as %s) }" (gen_ty_rust false v.gvar_info)
       | _, il ->
           if Str.string_match re_string_literal (extern_atom_r id) 0
           && List.for_all (function Init_int8 _ -> true | _ -> false) il
@@ -369,20 +369,23 @@ let rec print_expr fmt e =
       fprintf fmt "((%s%a) as %s)" op_name print_expr exp (gen_ty_rust false ty);
     )
   | RustLight.Ebinop (op_type, e1, e2, ty) -> (
-    begin match (type_of_expr e1, type_of_expr e2) with
-    | (Ctypes.Tpointer(_, _), Ctypes.Tint(_, _, _)) -> (
+    begin match (op_type, type_of_expr e1, type_of_expr e2) with
+    | (_, Ctypes.Tpointer(_, _), Ctypes.Tint(_, _, _)) -> (
         handle_ptr_arithmetic fmt op_type e1 e2
       )
-    | (Ctypes.Tint(_, _, _), Ctypes.Tpointer(_, _)) -> (
+    | (_, Ctypes.Tint(_, _, _), Ctypes.Tpointer(_, _)) -> (
         handle_ptr_arithmetic fmt op_type e2 e1
       )
-    | (Ctypes.Tlong(_, _), Ctypes.Tpointer(_, _)) -> (
+    | (_, Ctypes.Tlong(_, _), Ctypes.Tpointer(_, _)) -> (
         handle_ptr_arithmetic fmt op_type e2 e1
       )
-    | (Ctypes.Tpointer(_, _), Ctypes.Tlong(_, _)) -> (
+    | (_, Ctypes.Tpointer(_, _), Ctypes.Tlong(_, _)) -> (
         handle_ptr_arithmetic fmt op_type e1 e2
       )
-    | (_, _) ->
+    | (Cop.Osub, Ctypes.Tpointer(_, _), Ctypes.Tpointer(_, _)) -> (
+        fprintf fmt "(%a).offset_from(%a)" print_expr e1 print_expr e2
+      )
+    | (_, _, _) ->
     (
       let op_name =
         begin match op_type with
@@ -488,7 +491,9 @@ let rec print_arglist fmt arglist =
 
 let rec print_stmt fmt body =
   match body with
-  | S_skip -> fprintf fmt "/* skip stmt */@;";
+  | S_skip -> ()
+    (* fprintf fmt "/* skip stmt */@;"; *)
+
   | S_assign(e1, e2) -> (
       fprintf fmt "@[<hv 2>%a =@ %a;@]"
         print_expr e1
