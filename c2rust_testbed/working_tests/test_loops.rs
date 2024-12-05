@@ -1,5 +1,5 @@
 use libc::{c_int, c_uint};
-use rust_project::break_continue::entry;
+use rust_project::break_continue::entry_loop;
 
 const BUFFER_SIZE: usize = 70;
 
@@ -13,7 +13,7 @@ pub fn test_buffer() {
     ];
 
     unsafe {
-        entry(BUFFER_SIZE as u32, buffer.as_mut_ptr());
+        entry_loop(BUFFER_SIZE as u32, buffer.as_mut_ptr());
     }
 
     for index in 0..BUFFER_SIZE {

@@ -521,6 +521,22 @@ let rec print_stmt fmt body =
   | S_break(None) -> fprintf fmt "break;"
   | S_break(Some(lbl)) -> fprintf fmt "break 'lbl_%ld;" (camlint_of_coqint lbl)
   | S_builtin(maybe_ident, external_fn, lty,  lexp) -> fprintf fmt "unimplemented call stmt"
+  | S_loop2(Some(outer), Some(inner), s1, s2) -> (
+      fprintf fmt "@[<v 2>'lbl_%ld: loop {@;@[<v 2>'lbl_%ld: loop {@;%a@;<0 -2>}@]%a@;<0 -2>}@]"
+              (camlint_of_coqint outer) (camlint_of_coqint inner) print_stmt s1 print_stmt s2
+    )
+  | S_loop2(None, None, _, _) -> (
+      fprintf fmt "@[loop {}@]@;"
+    )
+  | S_loop2(Some(outer), None, S_skip, s2) -> (
+      fprintf fmt "@[<v 2>'lbl_%ld: loop {@;%a@;<0 -2>}@]"
+              (camlint_of_coqint outer) print_stmt s2
+    )
+  (* | S_loop2(Some(outer), None, s1, S_skip) -> ( *)
+  (*     fprintf fmt "@[<v 2>'lbl_%ld: loop {@;%a@;<0 -2>}@]" *)
+  (*             (camlint_of_coqint outer) print_stmt s1 *)
+  (*   ) *)
+  | S_loop2(_, _, _, _) -> let _ = Panic "Unexpected loop type" in ()
   | S_loop(None, stmt, S_skip) -> (
       fprintf fmt "@[<v 2>loop {@;%a@;<0 -2>}@]@;"
               print_stmt stmt

@@ -1,4 +1,4 @@
-void entry(unsigned buffer_size, int buffer[])
+void entry_loop(unsigned buffer_size, int buffer[])
 {
     if (buffer_size >= 70) {
         int i = 0;

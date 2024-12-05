@@ -186,6 +186,10 @@ Inductive rstatement: Type :=
   | S_sequence : rstatement -> rstatement -> rstatement
   | S_if_then_else : rexpr  -> rstatement -> rstatement -> rstatement
   | S_loop: option Z -> rstatement -> rstatement -> rstatement
+  (* outer lbl -> inner lbl -> block 1 -> block 2*)
+  (* loop 'outer_lbl {loop 'inner_lbl {block 1; break; } block 2} *)
+  (* TODO rm option *)
+  | S_loop2: option Z -> option Z -> rstatement -> rstatement -> rstatement
   | S_break : option Z -> rstatement
   | S_continue : option Z -> rstatement
   (* maybe (expression expected type of expression) -> stmt *)
@@ -991,29 +995,81 @@ Fixpoint transl_statement
           )
         end
     | Clight.Sbuiltin x ef tyargs bl => SimplExpr.error(msg "INVALID BUILTIN")
-    | Clight.Sloop s1 s2 =>
-        let loop_lbl :=
+    | Clight.Sloop ns1 ns2 =>
+        let (outer, inner) :=
           match next_lbl with
-          | None => Some 0%Z
-          | Some(n) => Some(n+1)
+          | None => (0%Z, 1%Z)
+          | Some(n) => (n+1, n+2)
         end in
-        let u_s_md :=
-          {|
-            ce := ce;
-            tyret := tyret;
-            nbrk := nbrk;
-            ncnt := ncnt;
-            cur_loop_lbl := loop_lbl;
-            cur_switch_lbl := loop_lbl;
-            next_lbl := loop_lbl;
-            f_rty := f_rty;
-            get_var_type := get_var_type;
-          |} in
-        gdo r_s1 <- transl_statement u_s_md s1;
-        gdo r_s2 <- transl_statement u_s_md s2;
-        SimplExpr.ret (S_loop loop_lbl r_s1 r_s2)
+        match (ns1, ns2) with
+        | (Clight.Sskip, Clight.Sskip) => (
+          SimplExpr.ret( S_loop2 None None S_skip S_skip)
+        )
+        | (Clight.Sskip, s2) => (
+          let u_s_md_2 :=
+            {|
+              ce := ce;
+              tyret := tyret;
+              nbrk := nbrk;
+              ncnt := ncnt;
+              cur_loop_lbl := Some(outer);
+              cur_switch_lbl := Some(outer);
+              next_lbl := Some(outer);
+              f_rty := f_rty;
+              get_var_type := get_var_type;
+            |} in
+          gdo r_s2 <- transl_statement u_s_md_2 s2;
+          SimplExpr.ret( S_loop2 (Some(outer)) None S_skip r_s2)
+        )
+        (* finnicky so I'm bailing *)
+        (* | (s1, Clight.Sskip) => ( *)
+        (*   let u_s_md_1 := *)
+        (*     {| *)
+        (*       ce := ce; *)
+        (*       tyret := tyret; *)
+        (*       nbrk := nbrk; *)
+        (*       ncnt := ncnt; *)
+        (*       cur_loop_lbl := Some(outer); *)
+        (*       cur_switch_lbl := Some(outer); *)
+        (*       next_lbl := Some(outer); *)
+        (*       f_rty := f_rty; *)
+        (*       get_var_type := get_var_type; *)
+        (*     |} in *)
+        (*   gdo r_s1 <- transl_statement u_s_md_1 s1; *)
+        (*   SimplExpr.ret( S_loop2 (Some(outer)) None r_s1 S_skip) *)
+        (* ) *)
+        | (s1, s2) => (
+          let u_s_md_1 :=
+            {|
+              ce := ce;
+              tyret := tyret;
+              nbrk := nbrk;
+              ncnt := ncnt;
+              cur_loop_lbl := Some(inner);
+              cur_switch_lbl := Some(outer);
+              next_lbl := Some(inner);
+              f_rty := f_rty;
+              get_var_type := get_var_type;
+            |} in
+          let u_s_md_2 :=
+            {|
+              ce := ce;
+              tyret := tyret;
+              nbrk := nbrk;
+              ncnt := ncnt;
+              cur_loop_lbl := Some(outer);
+              cur_switch_lbl := Some(outer);
+              next_lbl := Some(outer);
+              f_rty := f_rty;
+              get_var_type := get_var_type;
+            |} in
+          gdo r_s1 <- transl_statement u_s_md_1 s1;
+          gdo r_s2 <- transl_statement u_s_md_2 s2;
+          SimplExpr.ret (S_loop2 (Some(outer)) (Some(inner)) (S_sequence r_s1 (S_break (Some(inner)))) r_s2)
+        )
+        end
     | Clight.Sbreak => SimplExpr.ret (S_break cur_switch_lbl)
-    | Clight.Scontinue => SimplExpr.ret (S_continue cur_loop_lbl)
+    | Clight.Scontinue => SimplExpr.ret (S_break cur_loop_lbl)
     | Clight.Slabel lbl s => SimplExpr.error (msg "INVALID BUILTIN")
     | Clight.Sgoto lbl => SimplExpr.error (msg "INVALID BUILTIN")
   end
@@ -1260,6 +1316,7 @@ Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement
   | S_sequence s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_continue _ => PTree.empty _
   | S_loop _ s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
+  | S_loop2 _ _ s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_match_int rexpr ls =>
       merge_trees (walk_r_expr rexpr) (handle_ls_stmt in_scope_syms (ls))
   | S_builtin _ _ _ _ => PTree.empty _
