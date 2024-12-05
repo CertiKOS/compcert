@@ -21,6 +21,7 @@
         fenixStable = with fenix.packages.${system};
           combine [
             (latest.withComponents [
+              "miri"
               "cargo"
               "clippy"
               "rust-src"

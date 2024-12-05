@@ -77,7 +77,10 @@ Require Import Compopts.
 
 (** Pretty-printers (defined in Caml). *)
 Parameter print_Clight: Clight.program -> unit.
-Parameter print_Rustlight: list (string * string) -> (list (string * (option (string * Ctypes.composite_definition)))) -> string -> RustLight.r_program -> unit.
+Parameter print_Rustlight:
+  list (string * string)
+  -> (list (string * (option (string * Ctypes.composite_definition))))
+  -> string -> RustLight.r_program -> unit.
 Parameter extract_Symbols: Clight.program -> (list string * list (string * Ctypes.composite_definition)).
 Parameter print_Cminor: Cminor.program -> unit.
 Parameter print_RTL: Z -> RTL.program -> unit.

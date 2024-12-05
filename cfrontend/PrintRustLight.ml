@@ -117,8 +117,8 @@ let name_floattype_rust sz =
 
 let name_longtype_rust sz =
   match sz with
-  | Signed -> "libc::c_longlong"
-  | Unsigned -> "libc::c_ulonglong"
+  | Signed -> "libc::size_t"
+  | Unsigned -> "libc::size_t"
 
 let rec map_tylist_to_list tylist =
   match tylist with
@@ -648,7 +648,9 @@ let define_composite fmt (Composite(id, su, m, a)) =
   in
 
   (* either I define this locally or I'm importing it. Even if this is a local-only thing, it's hidden behind the module so this is fine *)
-  fprintf fmt "#[repr(C%s)]@;@[<v 2>pub %s %s {" maybe_aligned (struct_or_union su) (extern_atom_r id);
+  (* TODO while this does reflect C semantics, Copy is morally wrong here. *)
+  (* It would be better to clone explicitly where needed. *)
+  fprintf fmt "#[repr(C%s)]@;#[derive(Clone, Copy)]@;@[<v 2>pub %s %s {" maybe_aligned (struct_or_union su) (extern_atom_r id);
   List.iter (print_member fmt) m;
   fprintf fmt "@;<0 -2>}@]@; @;"
 
