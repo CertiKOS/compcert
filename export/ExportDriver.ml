@@ -22,12 +22,119 @@ open Driveraux
 open Frontend
 open Diagnostics
 
+let sym_mapping : ((string, string) Hashtbl.t) ref = ref (Hashtbl.create 7)
+
+(* struct or union ident -> (file, defn) option  *)
+let composite_mapping: ((string, ((string * Ctypes.composite_definition) option)) Hashtbl.t) ref = ref (Hashtbl.create 7)
+
+let list_c_files = ref ([])
+
+let add_to_list file = list_c_files := !list_c_files @ [file]
+
+let t_conv_fn = fun cl -> String.of_seq (List.to_seq cl)
+
+let convert_mapping (tbl : (string, string) Hashtbl.t) : (char list * char list) list =
+  Hashtbl.fold
+    (fun key value acc ->
+      (String.to_seq key |> List.of_seq, String.to_seq value |> List.of_seq) :: acc)
+    tbl
+    []
+
+let convert_mapping1 (tbl: (string, (string * Ctypes.composite_definition) option) Hashtbl.t) =
+  Hashtbl.fold (
+    fun key opt acc ->
+      match opt with
+      | Some ((v, dfn)) -> (String.to_seq key |> List.of_seq, Some ((String.to_seq v |> List.of_seq), dfn)) :: acc
+      | None -> (String.to_seq key |> List.of_seq, None) :: acc
+  ) tbl []
+
+let char_list_list_to_string_list (cll : char list list) : string list =
+  List.map t_conv_fn cll
+
+let print_string_list lst =
+  print_string "[";
+  List.iter (fun x -> Printf.printf "\"%s\"; " x) lst;
+  print_string "]\n"
+
+let [@warning "-42"] comp_eq a a_ =
+  match a,a_ with
+  | Ctypes.Composite (_, sou, mems, attrs), Ctypes.Composite(_, sou_, mems_, attrs_) -> (
+      let sou_r =
+        match (sou, sou_) with
+        | (Ctypes.Union, Ctypes.Union) -> true
+        | (Ctypes.Struct, Ctypes.Struct) -> true
+        | _ -> false
+      in
+      let mem_eq_fn = fun m_1 m_2 -> (
+          match (m_1, m_2) with
+          | Ctypes.Member_plain(_, ty), Ctypes.Member_plain(_, ty') -> ty = ty'
+          | Ctypes.Member_bitfield(_, a, b, c, d, e), Ctypes.Member_bitfield(_, a', b', c', d', e') ->
+            a = a' && b = b' && c = c' && d = d' && e = e'
+          | _ -> false
+        )
+      in
+      let mems_r =
+        if (List.length mems) != (List.length mems_) then
+          false
+        else
+          List.fold_left (fun acc (a, b) -> (mem_eq_fn a b) && acc)
+            true
+            (List.combine mems mems_)
+      in
+      let attrs_r = attrs = attrs_ in
+      sou_r && mems_r && attrs_r
+    )
+
+let extract_globals sourcename =
+  ensure_inputfile_exists sourcename;
+  (* printf "\nPTYPES: %s\n" sourcename; *)
+  let preproname = tmp_file ".i" in
+  preprocess sourcename preproname;
+  let csyntax = parse_c_file sourcename preproname in
+  Compiler.get_exports csyntax
+
+let print_hashtbl tbl =
+  printf "UID SYMBOL MAPPING: \n";
+  Hashtbl.iter (fun key value -> Printf.printf "UID %s: %s\n" key value) tbl;
+  printf "UID END SYMBOL MAPPING\n"
+
+let generate_mapping unit =
+  (* symbol -> module in rust that exports it *)
+  List.iter
+    (fun file_name ->
+       let module_name = String.sub file_name 0 ((String.length file_name) - 2) in
+       let glob_list = extract_globals file_name in
+       (match glob_list with
+        | Errors.OK l -> (List.iter
+                           (fun symbol ->
+                              Hashtbl.add !sym_mapping symbol module_name) (char_list_list_to_string_list (fst l))
+                          ;
+                          List.iter (fun (sym_chars, dfn) -> (
+                              let sym = t_conv_fn sym_chars in
+                              match Hashtbl.find_opt !composite_mapping sym with
+                              (* first occurence *)
+                              | None -> Hashtbl.replace !composite_mapping sym (Some((module_name, dfn)))
+                              (* set to none explicitly, do nothing *)
+                              | Some (None) -> printf "UUID explicitly setting to NONE\n"; ()
+                              | Some (Some (f, dfn_old)) -> (
+                                  (* let (sou, mems, attrs) = match dfn with | Ctypes.Composite(_,a,b,c) -> (a, b, c) in *)
+                                  (* let (sou_o, mems_o, attrs_o) = match dfn_old with | Ctypes.Composite(_,a,b,c) -> (a, b, c) in *)
+                                  if not (comp_eq dfn dfn_old) then
+                                    (* printf "sou is struct: %b, sou_o is struct %b" (sou == Ctypes.Struct) (sou_o == Ctypes.Union); *)
+                                    (* printf "UUID inequal for %s with %b %b %b, replacing!\n" sym (sou = sou_o) (mems = mems_o) (attrs = attrs_o) ; *)
+                                    (Hashtbl.replace !composite_mapping sym None)
+                              )
+                          )) (snd l))
+        | Errors.Error _ -> printf "ERROR making mapping!"; ())
+
+    ) !list_c_files; print_hashtbl !sym_mapping
+
 let tool_name = "CompCert AST generator"
 
 (* Specific options *)
 
-type export_mode = Mode_Csyntax | Mode_Clight
-let option_mode = ref Mode_Clight
+type export_mode = Mode_Csyntax | Mode_Clight | Mode_Rustlight
+let option_mode = ref Mode_Rustlight
 let option_normalize = ref false
 
 (* Export the CompCert Csyntax AST *)
@@ -40,7 +147,7 @@ let export_csyntax sourcename csyntax ofile =
 
 (* Transform the CompCert Csyntax AST into Clight and export it *)
 
-let export_clight sourcename csyntax ofile dump_rustlight =
+let export_clight sourcename csyntax ofile =
   let loc = file_loc sourcename in
   let clight =
     match SimplExpr.transl_program csyntax with
@@ -58,18 +165,13 @@ let export_clight sourcename csyntax ofile dump_rustlight =
   (* Dump Clight in C syntax if requested *)
   PrintClight.print_if_2 clight;
 
-  printf "%s" "Camels\n";
-
-  (* let rustlight = RustLight.transl_program clight in *)
-
-  (* (\* this is where we want to print to rust*\) *)
-  (* PrintRustLight.print_if rustlight; *)
-
-  (* Print Clight in Coq syntax *)
   let oc = open_out ofile in
   ExportClight.print_program (Format.formatter_of_out_channel oc)
                              clight sourcename !option_normalize;
   close_out oc
+
+(* let export_rustlight sourcename csyntax ofile = *)
+(*   let loc = file_loc sourcename in *)
 
 (* From C source to exported AST *)
 
@@ -80,11 +182,31 @@ let compile_c_file sourcename ifile ofile =
   set_dest Cprint.destination option_dparse ".parsed.c";
   set_dest PrintCsyntax.destination option_dcmedium ".compcert.c";
   set_dest PrintClight.destination option_dclight ".light.c";
-  set_dest PrintRustLight.destination option_drustlight ".rs";
+  set_dest PrintRustLight.destination option_drustlight ".light.rs";
   let cs = parse_c_file sourcename ifile in
+  let regular_sym_mapping = convert_mapping !sym_mapping in
+  let regular_composite_mapping = convert_mapping1 !composite_mapping in
+
+  let module_name = String.sub sourcename 0 ((String.length sourcename) - 2) in
+
   match !option_mode with
   | Mode_Csyntax -> export_csyntax sourcename cs ofile
-  | Mode_Clight  -> export_clight sourcename cs ofile option_drustlight
+  | Mode_Clight  -> export_clight sourcename cs ofile
+  | Mode_Rustlight -> (
+      match
+        (Compiler.print_r_program regular_sym_mapping regular_composite_mapping
+               (String.to_seq module_name |> List.of_seq) cs) with
+      | Errors.OK rprog -> (
+          let oc = open_out ofile in
+          ExportRustLight.print_program
+            (Format.formatter_of_out_channel oc) rprog ifile
+            regular_sym_mapping
+            regular_composite_mapping
+            module_name
+        )
+      | Errors.Error msg -> printf "error! %s" (C2C.string_of_errmsg msg)
+      ;
+  )
 
 let output_filename sourcename  =
   let prefixname = Filename.remove_extension sourcename in
@@ -216,6 +338,9 @@ try
   Printexc.record_backtrace true;
   Camlcoq.use_canonical_atoms := true;
   Frontend.init ();
+  generate_mapping ();
+  let _ = Camlcoq.atom_of_string = (Hashtbl.create 17 : (string, Camlcoq.atom) Hashtbl.t) in
+  let _ = Camlcoq.next_atom = ref BinNums.Coq_xH in
   parse_cmdline cmdline_actions;
   if !option_o <> None && !num_input_files >= 2 then
     fatal_error no_loc "Ambiguous '-o' option (multiple source files)";

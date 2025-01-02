@@ -5,12 +5,70 @@ open Camlcoq (*for extern_atom*)
 open RustLight
 exception Panic of string
 
+(* pulled from https://doc.rust-lang.org/book/appendix-01-keywords.html *)
+module StringSet = Set.Make(String)
+let rust_keywords  = StringSet.of_list [
+  "as";
+  "async";
+  "await";
+  "break";
+  "const";
+  "continue";
+  "crate";
+  "dyn";
+  "else";
+  "enum";
+  "extern";
+  "false";
+  "fn";
+  "for";
+  "if";
+  "impl";
+  "in";
+  "let";
+  "loop";
+  "match";
+  "mod";
+  "move";
+  "mut";
+  "pub";
+  "ref";
+  "return";
+  "Self";
+  "self";
+  "static";
+  "struct";
+  "super";
+  "trait";
+  "true";
+  "type";
+  "union";
+  "unsafe";
+  "use";
+  "where";
+  "while";
+  "abstract";
+  "become";
+  "box";
+  "do";
+  "final";
+  "macro";
+  "override";
+  "priv";
+  "try";
+  "typeof";
+  "unsized";
+  "virtual";
+  "yield"
+]
+
 (* HACK the proper solution is to add to this map in process_c *)
 let extern_atom_r a =
   try
     let res = Hashtbl.find string_of_atom a in
     (* let _ = printf "NAMEVAR: %s\n" res in *)
-    if res = "main" then "main_2" else res
+    if res = "main" then "main_2" else
+      if StringSet.mem res rust_keywords then "r#" ^ res else res
   with Not_found ->
     "main"
 
@@ -572,7 +630,8 @@ let rec print_stmt fmt body =
 
 and print_cases fmt cases =
   match cases with
-  | LSnil ->
+  (* TODO break  *)
+  | LSnil _ ->
       fprintf fmt "@[<v 2>_ => () @]@;";
   | LScons (n, body, stmts) ->
       fprintf fmt "@[<v 2>%s => {@;%a@;<0 -2>}@]@;" (Z.to_string n) print_stmt body;
@@ -670,7 +729,6 @@ let define_composite fmt (Composite(id, su, m, a)) =
   List.iter (print_member fmt) m;
   fprintf fmt "@;<0 -2>}@]@; @;"
 
-module StringSet = Set.Make(String)
 
 let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
   printf "UID list of ids %d\n" (List.length list_of_ids);

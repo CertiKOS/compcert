@@ -199,7 +199,7 @@ Inductive rstatement: Type :=
   (* and we assign to nothing *)
   | S_match_int : rexpr -> labeled_rstatements -> rstatement
 with labeled_rstatements : Type :=
-  | LSnil: labeled_rstatements
+  | LSnil: rstatement -> labeled_rstatements
   | LScons: Z -> rstatement -> labeled_rstatements -> labeled_rstatements.
 
 
@@ -219,6 +219,7 @@ Record r_function : Type := mkrfunction {
   (* we use this in printing exports*)
   fn_imports: PTree.t unit;
 
+  (* TODO drop *)
   fn_is_safe: bool;
 }.
 
@@ -687,6 +688,14 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
       gdom _ <- check_ty ty;
       let exp_typ := Clight.typeof exp in
       gdo translated_exp <- transl_expr ce exp;
+      let builder := (fun c =>
+
+        let r_ty := bang_type in
+        let conditional := Ebinop One translated_exp c cond_type in
+        let if_expr := Econst_int (Int.repr 0)  r_ty in
+        let else_expr := Econst_int (Int.repr 1 ) r_ty in
+        SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
+      ) in
       (* have to expand bool cast to if else statement *)
       match op with
       (* the ! operator maps scalar and pointer types to the int type. *)
@@ -694,39 +703,20 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
           match exp_typ with
           | Ctypes.Tint _ _ _ =>
           (
-          (* this is supposed to return int. int must be >= 16 bits according to c99 *)
-          (* however in C2C.ml, C.IInt is 32bit width, so we use that here too. *)
-          (* TODO I'm assuming we don't care about attributes. *)
-          (*      But, I couldn't find anything in the c99 spec about this *)
-            let r_ty := bang_type in
-            let conditional := Ebinop One translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  r_ty in
-            let else_expr := Econst_int (Int.repr 1 ) r_ty in
-            SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
+            (* this is supposed to return int. int must be >= 16 bits according to c99 *)
+            (* however in C2C.ml, C.IInt is 32bit width, so we use that here too. *)
+            (* TODO I'm assuming we don't care about attributes. *)
+            (*      But, I couldn't find anything in the c99 spec about this *)
+            builder (Econst_int (Int.repr 0) exp_typ)
           )
           | Ctypes.Tlong _ _ => (
-            (* TODO separate out into function. It's the same exact code. *)
-            let r_ty := bang_type in
-            let conditional := Ebinop One translated_exp (Econst_int (Int.repr 0) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  r_ty in
-            let else_expr := Econst_int (Int.repr 1 ) r_ty in
-            SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
+            builder (Econst_int (Int.repr 0) exp_typ)
           )
           | Ctypes.Tfloat Ctypes.F64 _ => (
-            (* TODO separate out into function or something. It's the same exact code varying only by float. *)
-            let r_ty := bang_type in
-            let conditional := Ebinop One translated_exp (Econst_float (Bits.b64_of_bits 0%Z) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  r_ty in
-            let else_expr := Econst_int (Int.repr 1 ) r_ty in
-            SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
+            builder (Econst_float (Bits.b64_of_bits 0%Z) exp_typ)
           )
           | Ctypes.Tfloat Ctypes.F32 _ => (
-            (* TODO separate out into function or something. It's the same exact code varying only by float. *)
-            let r_ty := bang_type in
-            let conditional := Ebinop One translated_exp (Econst_single (Bits.b32_of_bits 0%Z) exp_typ) cond_type in
-            let if_expr := Econst_int (Int.repr 0)  r_ty in
-            let else_expr := Econst_int (Int.repr 1 ) r_ty in
-            SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
+            builder (Econst_single (Bits.b32_of_bits 0%Z) exp_typ)
           )
           | Ctypes.Tpointer _ _ => (
             let r_ty := bang_type in
@@ -762,12 +752,7 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
         end;
       let needs_mapping_to_int :=
       match op with
-        | Olt => true
-        | Ogt => true
-        | Ole => true
-        | Oge => true
-        | Oeq => true
-        | One => true
+        | Olt | Ogt | Ole | Oge | Oeq | One => true
         | _ => false
       end in
       if needs_mapping_to_int then
@@ -968,8 +953,11 @@ Fixpoint transl_statement
           get_var_type := get_var_type;
         |} in
 
+      (* TODO this is where the break should be *)
+      let do_default := S_skip in
+
       gdo (dflt_case_inner_stmt, labeled_match_stmts) <-
-        transl_switch u_s_md stmts exp_ident_as_exp exp_typ dflt_ident_as_exp dflt_case_ty S_skip LSnil ;
+        transl_switch u_s_md stmts exp_ident_as_exp exp_typ dflt_ident_as_exp dflt_case_ty S_skip (LSnil do_default);
 
       let match_stmt := S_match_int exp_ident_as_exp labeled_match_stmts in
 
@@ -1334,7 +1322,7 @@ Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement
   end
 with handle_ls_stmt (in_scope_syms: PTree.t unit) (ls: labeled_rstatements) : PTree.t unit :=
   match ls with
-  | LSnil => PTree.empty _
+  | LSnil stmt => merge_trees (walk_r_body_for_symbols in_scope_syms stmt) (PTree.empty _)
   | LScons _ rstatement ls => merge_trees (walk_r_body_for_symbols in_scope_syms rstatement) (handle_ls_stmt in_scope_syms ls)
   end.
 

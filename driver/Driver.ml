@@ -68,7 +68,6 @@ let convert_mapping1 (tbl: (string, (string * Ctypes.composite_definition) optio
 (* From CompCert C AST to asm *)
 
 let compile_c_file sourcename ifile ofile =
-  (* printf"\nCOMPILE_C IS CALLED\n"; *)
   (*  *set the destinations (e.g. pointers) if we want to print *)
 
   (* Prepare to dump Clight, RTL, etc, if requested *)
@@ -95,7 +94,7 @@ let compile_c_file sourcename ifile ofile =
 
   match (Compiler.print_r_program regular_sym_mapping regular_composite_mapping (String.to_seq module_name |> List.of_seq) csyntax) with
   | Errors.OK _rprog -> printf "translated!"
-  | Errors.Error msg -> printf "error!"
+  | Errors.Error msg -> printf "error! %s" (C2C.string_of_errmsg msg)
   ;
   (* (1) call out to transf_rust_program *)
   (* (2)  *)
@@ -450,7 +449,7 @@ let cmdline_actions =
   Exact "-Obranchless", Set option_Obranchless;
   Exact "-fsmall-data", Integer(fun n -> option_small_data := n);
   Exact "-fsmall-const", Integer(fun n -> option_small_const := n);
-  Exact "-ffloat-const-prop", Integer(fun n -> option_ffloatconstprop := n); 
+  Exact "-ffloat-const-prop", Integer(fun n -> option_ffloatconstprop := n);
   Exact "-falign-functions", Integer(fun n -> check_align n; option_falignfunctions := Some n);
   Exact "-falign-branch-targets", Integer(fun n -> check_align n; option_falignbranchtargets := n);
   Exact "-falign-cond-branches", Integer(fun n -> check_align n; option_faligncondbranchs := n);] @
@@ -626,10 +625,11 @@ let _ =
            };
     Printexc.record_backtrace true;
     Frontend.init ();
-    printf "%s" "starting spot that is actually called\n";
     parse_cmdline cmdline_actions;
     DebugInit.init (); (* Initialize the debug functions *)
     generate_mapping ();
+    let _ = Camlcoq.atom_of_string = (Hashtbl.create 17 : (string, Camlcoq.atom) Hashtbl.t) in
+    let _ = Camlcoq.next_atom = ref BinNums.Coq_xH in
     generate_boilerplate_rust ();
     (* print_hashtbl !sym_mapping; *)
     if nolink () && !option_o <> None && !num_source_files >= 2 then
@@ -640,9 +640,6 @@ let _ =
       fatal_error no_loc "option '-main' requires option '-interp'";
     (* the line below is where all the compilation goes *)
     let _linker_args = time "Total compilation time" perform_actions () in
-    (* if not (nolink ()) && linker_args <> [] then begin *)
-    (*   linker (output_filename_default "a.out") linker_args *)
-    (* end; *)
     check_errors ()
   with
   | Sys_error msg
