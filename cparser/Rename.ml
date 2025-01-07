@@ -22,6 +22,61 @@ open Cutil
 module StringSet = Set.Make(String)
 module StringMap = Map.Make(String)
 
+let rust_keywords  = StringSet.of_list [
+  "as";
+  "async";
+  "await";
+  "break";
+  "const";
+  "continue";
+  "crate";
+  "dyn";
+  "else";
+  "enum";
+  "extern";
+  "false";
+  "fn";
+  "for";
+  "if";
+  "impl";
+  "in";
+  "let";
+  "loop";
+  "match";
+  "mod";
+  "move";
+  "mut";
+  "pub";
+  "ref";
+  "return";
+  "Self";
+  "self";
+  "static";
+  "struct";
+  "super";
+  "trait";
+  "true";
+  "type";
+  "union";
+  "unsafe";
+  "use";
+  "where";
+  "while";
+  "abstract";
+  "become";
+  "box";
+  "do";
+  "final";
+  "macro";
+  "override";
+  "priv";
+  "try";
+  "typeof";
+  "unsized";
+  "virtual";
+  "yield"
+]
+
 type rename_env = {
   re_id: ident IdentMap.t;
   re_public: ident StringMap.t;
@@ -54,8 +109,10 @@ let rename env id =
   with Not_found ->
     let basename =
       if id.name = "" then Printf.sprintf "_%d" id.stamp else id.name in
+    Printf.printf "RENAMING: %s" basename;
+
     let newname =
-      if not (StringSet.mem basename env.re_used) then basename else begin
+      if not (StringSet.mem basename env.re_used) && not (StringSet.mem basename rust_keywords) then basename else begin
         let rec find_name n =
           let s = Printf.sprintf "%s__%d" basename n in
           if StringSet.mem s env.re_used

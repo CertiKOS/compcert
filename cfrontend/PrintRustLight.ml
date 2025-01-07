@@ -68,7 +68,8 @@ let extern_atom_r a =
     let res = Hashtbl.find string_of_atom a in
     (* let _ = printf "NAMEVAR: %s\n" res in *)
     if res = "main" then "main_2" else
-      if StringSet.mem res rust_keywords then "r#" ^ res else res
+      (* if StringSet.mem res rust_keywords then "r#" ^ res else res *)
+      res
   with Not_found ->
     "main"
 

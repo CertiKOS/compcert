@@ -222,17 +222,3 @@ let print_program fmt r_prog sourcefile  glbl_mapping struct_mapping mod_name=
   fprintf fmt "  mkprogram composites global_definitions public_idents %a Logic.I.@ @ "
             ident r_prog.Ctypes.prog_main;
   fprintf fmt "@]@."
-  (* define_idents fmt; *)
-  (* List.iter (print_globdef fmt) prog.RustLight.prog_defs; *)
-  (* fprintf fmt "Definition composites : list composite_definition :=@ "; *)
-  (* print_list print_composite_definition fmt prog.prog_types; *)
-  (* fprintf fmt ".@ @ "; *)
-  (* fprintf fmt "Definition global_definitions : list (ident * globdef fundef type) :=@ "; *)
-  (* print_list print_ident_globdef fmt prog.Ctypes.prog_defs; *)
-  (* fprintf fmt ".@ @ "; *)
-  (* fprintf fmt "Definition public_idents : list ident :=@ "; *)
-  (* print_list ident fmt prog.Ctypes.prog_public; *)
-  (* fprintf fmt ".@ @ "; *)
-  (* fprintf fmt "Definition prog : Clight.program := @ "; *)
-  (* fprintf fmt "  mkprogram composites global_definitions public_idents %a Logic.I.@ @ " *)
-  (*           ident prog.Ctypes.prog_main; *)
