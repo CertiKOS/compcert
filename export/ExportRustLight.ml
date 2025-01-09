@@ -77,8 +77,8 @@ let rec expr fmt = function
       fprintf fmt "(Esizeof %a %a)" typ t1 typ t
   | Ealignof(t1, t) ->
       fprintf fmt "(Ealignof %a %a)" typ t1 typ t
-  | Eif_then_else(c, e1, e2, ty) ->
-      fprintf fmt "@[<hov 2>(Eifthenelse %a@ %a@ %a)@]" expr c expr e1 expr e2
+  (* | Eif_then_else(c, e1, e2, ty) -> *)
+  (*     fprintf fmt "@[<hov 2>(Eifthenelse %a@ %a@ %a)@]" expr c expr e1 expr e2 *)
   | Enull_check(e) ->
       fprintf fmt "@[<hov 2>(Enull_check %a)@]"
          expr e
@@ -152,7 +152,7 @@ let rec name_expr = function
   | Esizeof(t1, t) -> ()
   | Ealignof(t1, t) -> ()
   | Enull_check(e) -> name_expr e
-  | Eif_then_else(c, e1, e2, _ty) -> name_expr c; name_expr e1; name_expr e2
+  (* | Eif_then_else(c, e1, e2, _ty) -> name_expr c; name_expr e1; name_expr e2 *)
 
 let rec name_stmt = function
   | S_skip -> ()

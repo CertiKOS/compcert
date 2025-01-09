@@ -111,7 +111,7 @@ Inductive rexpr : Type :=
   | Esizeof: type -> type  -> rexpr
   | Ealignof: type -> type  -> rexpr
   (* conditional (boolean) -> if expr -> else expr -> type of exprs -> rexpr *)
-  | Eif_then_else: rexpr -> rexpr -> rexpr -> type -> rexpr
+  (* | Eif_then_else: rexpr -> rexpr -> rexpr -> type -> rexpr *)
   (* check if null ptr. this ought to be a fn call but I need to move that to an expression first *)
   (* it's fine to special case for now. *)
   | Enull_check: rexpr -> rexpr.
@@ -132,7 +132,6 @@ Definition r_typeof (e: rexpr) : type :=
   | Efield _ _ ty => ty
   | Esizeof _ ty => ty
   | Ealignof _ ty => ty
-  | Eif_then_else _ _ _ ty => ty
   | Enull_check _ => Ctypes.Tint Ctypes.IBool Signed noattr
   end.
 
@@ -272,7 +271,6 @@ Definition expr_should_be_split (e: rexpr) : bool :=
   | Efield e1 id ty => true
   | Esizeof t1 ty => true
   | Ealignof t1 ty => true
-  | Eif_then_else cond e_then e_else ty => true
   | Enull_check e1 => true
   | Eaddrof e1 ty => true
   end.
@@ -338,35 +336,35 @@ Fixpoint split_expr (e: rexpr) {struct e} : SimplExpr.mon (sum rexpr ((rstatemen
       end
   | Esizeof t1 ty => SimplExpr.ret( inr (S_skip, e))
   | Ealignof t1 ty => SimplExpr.ret( inr (S_skip, e))
-  | Eif_then_else cond e_then e_else ty =>
-      gdo split_1 <- split_expr cond;
-      gdo split_2 <- split_expr e_then;
-      gdo split_3 <- split_expr e_else;
-      match (split_1, split_2, split_3) with
-      | (inl _, inl _, inl _) => SimplExpr.ret( inr (S_skip, e))
-      | (inr (stmts1, e1), inl _, inl _) =>
-          let res := inr (stmts1, Eif_then_else e1 e_then e_else ty) in
-          SimplExpr.ret(res)
-      | (inl _, inr (stmts2, e2), inl _) =>
-          let res := inr (stmts2, Eif_then_else cond e2 e_else ty) in
-          SimplExpr.ret(res)
-      | (inl _, inl _, inr (stmts3, e3)) =>
-          let res := inr (stmts3, Eif_then_else cond e_then e3 ty) in
-          SimplExpr.ret(res)
-      | (inl _, inr (stmts2, e2), inr (stmts3, e3)) =>
-          let res := inr (S_sequence stmts2 stmts3, Eif_then_else cond e2 e3 ty) in
-          SimplExpr.ret(res)
-      | (inr (stmts1, e1), inl _, inr (stmts3, e3)) =>
-          let res := inr (S_sequence stmts1 stmts3, Eif_then_else e1 e_then e3 ty) in
-          SimplExpr.ret(res)
-      | (inr (stmts1, e1), inr (stmts2, e2), inl _) =>
-          let res := inr (S_sequence stmts1 stmts2, Eif_then_else e1 e2 e_else ty) in
-          SimplExpr.ret(res)
-      | (inr (stmts1, e1), inr (stmts2, e2), inr (stmts3, e3)) =>
-          let res := inr (S_sequence stmts1 (S_sequence stmts2 stmts3),
-                         Eif_then_else e1 e2 e3 ty) in
-          SimplExpr.ret(res)
-      end
+  (* | Eif_then_else cond e_then e_else ty => *)
+  (*     gdo split_1 <- split_expr cond; *)
+  (*     gdo split_2 <- split_expr e_then; *)
+  (*     gdo split_3 <- split_expr e_else; *)
+  (*     match (split_1, split_2, split_3) with *)
+  (*     | (inl _, inl _, inl _) => SimplExpr.ret( inr (S_skip, e)) *)
+  (*     | (inr (stmts1, e1), inl _, inl _) => *)
+  (*         let res := inr (stmts1, Eif_then_else e1 e_then e_else ty) in *)
+  (*         SimplExpr.ret(res) *)
+  (*     | (inl _, inr (stmts2, e2), inl _) => *)
+  (*         let res := inr (stmts2, Eif_then_else cond e2 e_else ty) in *)
+  (*         SimplExpr.ret(res) *)
+  (*     | (inl _, inl _, inr (stmts3, e3)) => *)
+  (*         let res := inr (stmts3, Eif_then_else cond e_then e3 ty) in *)
+  (*         SimplExpr.ret(res) *)
+  (*     | (inl _, inr (stmts2, e2), inr (stmts3, e3)) => *)
+  (*         let res := inr (S_sequence stmts2 stmts3, Eif_then_else cond e2 e3 ty) in *)
+  (*         SimplExpr.ret(res) *)
+  (*     | (inr (stmts1, e1), inl _, inr (stmts3, e3)) => *)
+  (*         let res := inr (S_sequence stmts1 stmts3, Eif_then_else e1 e_then e3 ty) in *)
+  (*         SimplExpr.ret(res) *)
+  (*     | (inr (stmts1, e1), inr (stmts2, e2), inl _) => *)
+  (*         let res := inr (S_sequence stmts1 stmts2, Eif_then_else e1 e2 e_else ty) in *)
+  (*         SimplExpr.ret(res) *)
+  (*     | (inr (stmts1, e1), inr (stmts2, e2), inr (stmts3, e3)) => *)
+  (*         let res := inr (S_sequence stmts1 (S_sequence stmts2 stmts3), *)
+  (*                        Eif_then_else e1 e2 e3 ty) in *)
+  (*         SimplExpr.ret(res) *)
+  (*     end *)
   | Enull_check e1 =>
       gdo inner_split <- split_expr e1;
       match inner_split with
@@ -471,11 +469,12 @@ Definition gen_cast_for_conditional
       gdom zero_const <- gen_zero_const ty;
       SimplExpr.ret (Ebinop One expr zero_const cond_type)
   | Ctypes.Tpointer ty _attrs  =>
-      let r_ty := bang_type in
-      gdom zero_const <- gen_zero_const r_ty;
-      let if_expr := Econst_int (Int.repr 0)  r_ty in
-      let else_expr := Econst_int (Int.repr 1 ) r_ty in
-      SimplExpr.ret (Ebinop One (Eif_then_else (Enull_check expr) if_expr else_expr r_ty ) zero_const cond_type)
+      SimplExpr.ret(Eunop Onotbool (Enull_check expr) cond_type)
+      (* let r_ty := bang_type in *)
+      (* gdom zero_const <- gen_zero_const r_ty; *)
+      (* let if_expr := Econst_int (Int.repr 0)  r_ty in *)
+      (* let else_expr := Econst_int (Int.repr 1 ) r_ty in *)
+      (* SimplExpr.ret (Ebinop One (Eif_then_else (Enull_check expr) if_expr else_expr r_ty ) zero_const cond_type) *)
   (* | Ctypes. *)
   | ty => SimplExpr.error (msg (String.append " Expected scalar or pointer type in condition. Got unexpected type: " (type_to_string ty)))
   end.
@@ -510,12 +509,11 @@ Fixpoint nuke_equalities (e: rexpr) : rexpr :=
       let not_fn_ptr := negb (is_fn_ptr ty) in
       let types_match := type_eq (r_typeof e') ty in
       if andb not_fn_ptr types_match then e' else e
-  (* | Ecast e' ty => e *)
   | Efield e' id ty => Efield (nuke_equalities e') id ty
   | Esizeof _ _ => e
   | Ealignof _ _ => e
-  | Eif_then_else e' e'' e''' ty =>
-      Eif_then_else (nuke_equalities e') (nuke_equalities e'') (nuke_equalities e''') ty
+  (* | Eif_then_else e' e'' e''' ty => *)
+  (*     Eif_then_else (nuke_equalities e') (nuke_equalities e'') (nuke_equalities e''') ty *)
   | Enull_check e' => Enull_check (nuke_equalities e')
   end.
 
@@ -710,13 +708,10 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
       gdom _ <- check_ty ty;
       let exp_typ := Clight.typeof exp in
       gdo translated_exp <- transl_expr ce exp;
+      (* for the most part: compare to 0 value of the type, then the output is a bool.
+         then cast to an int as required by c99 standard *)
       let builder := (fun c =>
-
-        let r_ty := bang_type in
-        let conditional := Ebinop One translated_exp c cond_type in
-        let if_expr := Econst_int (Int.repr 0)  r_ty in
-        let else_expr := Econst_int (Int.repr 1 ) r_ty in
-        SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
+        SimplExpr.ret(Ecast (Ebinop Oeq translated_exp c cond_type) bang_type)
       ) in
       (* have to expand bool cast to if else statement *)
       match op with
@@ -726,32 +721,31 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
           | Ctypes.Tint _ _ _ =>
           (
             (* this is supposed to return int. int must be >= 16 bits according to c99 *)
-            (* however in C2C.ml, C.IInt is 32bit width, so we use that here too. *)
+            (* however in C2C.ml, C.Int is 32bit width, so we use that here too. *)
             (* TODO I'm assuming we don't care about attributes. *)
             (*      But, I couldn't find anything in the c99 spec about this *)
-            builder (Econst_int (Int.repr 0) exp_typ)
+            let c := (Econst_int (Int.repr 0) exp_typ) in
+            builder c
           )
           | Ctypes.Tlong _ _ => (
-            builder (Econst_int (Int.repr 0) exp_typ)
+            let c := (Econst_int (Int.repr 0) exp_typ) in
+            builder c
           )
           | Ctypes.Tfloat Ctypes.F64 _ => (
-            builder (Econst_float (Bits.b64_of_bits 0%Z) exp_typ)
+            let c := Econst_float (Bits.b64_of_bits 0%Z) exp_typ in
+            builder c
           )
           | Ctypes.Tfloat Ctypes.F32 _ => (
-            builder (Econst_single (Bits.b32_of_bits 0%Z) exp_typ)
+            let c := Econst_single (Bits.b32_of_bits 0%Z) exp_typ in
+            builder c
           )
           | Ctypes.Tpointer _ _ => (
-            let r_ty := bang_type in
-            let conditional := Enull_check translated_exp in
-            let if_expr := Econst_int (Int.repr 0)  r_ty in
-            let else_expr := Econst_int (Int.repr 1 ) r_ty in
-            SimplExpr.ret( Eif_then_else conditional if_expr else_expr r_ty)
+            SimplExpr.ret( Ecast (Enull_check translated_exp) bang_type )
           )
           (* TODO consider the array type *)
-          | _ => SimplExpr.error( msg "invalid type passed into ! expression. Expected scalar or pointer type.")
           (* TODO how are arrays handled*)
+          | _ => SimplExpr.error( msg "invalid type passed into ! expression. Expected scalar or pointer type.")
           end
-      (* ) *)
       | _ => SimplExpr.ret(Eunop op translated_exp ty)
       end
   | Clight.Ebinop op exp1 exp2 ty =>
@@ -779,13 +773,11 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
       end in
       if needs_mapping_to_int then
         (
-        let conditional := Ebinop op c_rexp1
-                             c_rexp2 cond_type in
-        let if_expr := Econst_int (Int.repr 1) bang_type in
-        let else_expr := Econst_int (Int.repr 0) bang_type in
-        let final_binop := Eif_then_else conditional if_expr else_expr bang_type in
-        i2etc bang_type ty final_binop
-        (* TODO I'm pretty sure the resulting expression after the binop may need to be coerced*)
+          (* the idea is the same as unop. Perform comparison, then cast the output rust bool
+             to an int to match the C semantics *)
+          let conditional := Ebinop op c_rexp1 c_rexp2 cond_type in
+          let final_binop := Ecast conditional bang_type in
+          i2etc bang_type ty final_binop
         )
       else
         let final_binop := Ebinop op c_rexp1 c_rexp2 rty in
@@ -1504,6 +1496,8 @@ Definition gen_new_main'
   end.
 
 Print cons.
+
+Definition transl_casts (c_prog: Clight.program) : res Clight.program := OK(c_prog).
 
 Definition transl_program (c_prog: Clight.program) : res (r_program) :=
   (* symbols that we know to be in scope already *)

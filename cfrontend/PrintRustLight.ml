@@ -110,7 +110,7 @@ let extern_atom_r a =
 let type_of_expr e =
   match e with
   | Econst_int(_, ty) -> ty
-  | Eif_then_else(_, _, _, ty) -> ty
+  (* | Eif_then_else(_, _, _, ty) -> ty *)
   | Econst_float(_, ty) -> ty
   | Econst_single(_, ty) -> ty
   | Econst_long(_, ty) -> ty
@@ -124,7 +124,7 @@ let type_of_expr e =
   | Efield(_, _, ty) -> ty
   | Esizeof(_, ty) -> ty
   | Ealignof(_, ty) -> ty
-  | Enull_check(_) -> Ctypes.Tint(Ctypes.IBool, Signed, noattr)
+  | Enull_check(_) -> Ctypes.Tint(Ctypes.IBool, Unsigned, noattr)
 
 let is_composite ty =
   match ty with
@@ -388,10 +388,10 @@ let print_globvar fmt tds id v =
 
 let rec print_expr fmt e =
   match e with
-  | Eif_then_else(cond, if_branch, else_branch, _ty) ->(
-      fprintf fmt "@[<v 2>if %a {@ %a@;<0 -2>} else {@;%a@;<0 -2>}@]"
-        print_expr cond print_expr if_branch print_expr else_branch
-    )
+  (* | Eif_then_else(cond, if_branch, else_branch, _ty) ->( *)
+  (*     fprintf fmt "@[<v 2>if %a {@ %a@;<0 -2>} else {@;%a@;<0 -2>}@]" *)
+  (*       print_expr cond print_expr if_branch print_expr else_branch *)
+  (*   ) *)
   | Econst_int(n, Ctypes.Tint(I32, Unsigned, _)) ->
     fprintf fmt "(%lu as libc::c_uint)" (camlint_of_coqint n)
   | Econst_int(n, Ctypes.Tint(IBool, _, _)) ->
