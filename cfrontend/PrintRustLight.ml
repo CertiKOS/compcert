@@ -898,17 +898,19 @@ let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_de
   List.iter (fun (k, v_opt) -> Hashtbl.add tbl k v_opt) elts;
   tbl
 
-
 let print_if
 
-    (sym_mapping: RustLight.PositiveSet.t)
-    (clunky_sym_mapping: (char list * char list) list)
-    (clunky_composite_mapping: (char list * ((char list * Ctypes.composite_definition) option)) list)
+    (clunky_sym_mapping: str_map_globals)
+    (clunky_composite_mapping: str_map_composites)
     (clunky_mod_name: char list)
     prog =
   match !destination with
   | None -> ()
   | Some f ->
+    (* We need ocaml strings to print out variable names. *)
+    (* We should do that all at once to avoid repeatedly converting. *)
+    (* Since we have to iterate over all the data anyway, might as well convert *)
+    (* to a more efficient representation *)
     let sym_mapping = fix_mapping_types clunky_sym_mapping in
     let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
     let mod_name = List.to_seq clunky_mod_name |> String.of_seq in

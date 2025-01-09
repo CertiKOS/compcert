@@ -181,4 +181,4 @@ Separate Extraction
    Floats.Float32.from_parsed Floats.Float.from_parsed
    Globalenvs.Senv.invert_symbol
    Parser.translation_unit_file
-   RustLight.rexpr RustLight.r_program.
+   RustLight.rexpr RustLight.r_program RustLight.StrMap RustLight.str_map_globals RustLight.str_map_composites.

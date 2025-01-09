@@ -21,35 +21,18 @@ open CommonOptions
 open Driveraux
 open Frontend
 open Diagnostics
+open RustLight
 
-let sym_mapping : ((string, string) Hashtbl.t) ref = ref (Hashtbl.create 7)
+(* (\* struct or union ident -> (file, defn) option  *\) *)
+let sym_mapping : (str_map_globals) ref = ref (StrMap.empty)
 
 (* struct or union ident -> (file, defn) option  *)
-let composite_mapping: ((string, ((string * Ctypes.composite_definition) option)) Hashtbl.t) ref = ref (Hashtbl.create 7)
+let composite_mapping : (str_map_composites) ref = ref (StrMap.empty)
+
 
 let list_c_files = ref ([])
 
 let add_to_list file = list_c_files := !list_c_files @ [file]
-
-let t_conv_fn = fun cl -> String.of_seq (List.to_seq cl)
-
-let convert_mapping (tbl : (string, string) Hashtbl.t) : (char list * char list) list =
-  Hashtbl.fold
-    (fun key value acc ->
-      (String.to_seq key |> List.of_seq, String.to_seq value |> List.of_seq) :: acc)
-    tbl
-    []
-
-let convert_mapping1 (tbl: (string, (string * Ctypes.composite_definition) option) Hashtbl.t) =
-  Hashtbl.fold (
-    fun key opt acc ->
-      match opt with
-      | Some ((v, dfn)) -> (String.to_seq key |> List.of_seq, Some ((String.to_seq v |> List.of_seq), dfn)) :: acc
-      | None -> (String.to_seq key |> List.of_seq, None) :: acc
-  ) tbl []
-
-let char_list_list_to_string_list (cll : char list list) : string list =
-  List.map t_conv_fn cll
 
 let print_string_list lst =
   print_string "[";
@@ -102,18 +85,20 @@ let generate_mapping unit =
   (* symbol -> module in rust that exports it *)
   List.iter
     (fun file_name ->
-       let module_name = String.sub file_name 0 ((String.length file_name) - 2) in
+       let module_name = String.sub file_name 0 ((String.length file_name) - 2) |> String.to_seq |> List.of_seq in
        let glob_list = extract_globals file_name in
        (match glob_list with
         | Errors.OK l -> (List.iter
                            (fun symbol ->
-                              Hashtbl.add !sym_mapping symbol module_name) (char_list_list_to_string_list (fst l))
+                              sym_mapping := StrMap.add symbol module_name !sym_mapping;) (fst l)
                           ;
-                          List.iter (fun (sym_chars, dfn) -> (
-                              let sym = t_conv_fn sym_chars in
-                              match Hashtbl.find_opt !composite_mapping sym with
+                          List.iter (fun (sym, dfn) -> (
+                              match StrMap.find sym !composite_mapping with
                               (* first occurence *)
-                              | None -> Hashtbl.replace !composite_mapping sym (Some((module_name, dfn)))
+                              | None ->
+                                (
+                                  composite_mapping := StrMap.add sym (Some((module_name, dfn))) !composite_mapping;
+                                )
                               (* set to none explicitly, do nothing *)
                               | Some (None) -> printf "UUID explicitly setting to NONE\n"; ()
                               | Some (Some (f, dfn_old)) -> (
@@ -122,12 +107,12 @@ let generate_mapping unit =
                                   if not (comp_eq dfn dfn_old) then
                                     (* printf "sou is struct: %b, sou_o is struct %b" (sou == Ctypes.Struct) (sou_o == Ctypes.Union); *)
                                     (* printf "UUID inequal for %s with %b %b %b, replacing!\n" sym (sou = sou_o) (mems = mems_o) (attrs = attrs_o) ; *)
-                                    (Hashtbl.replace !composite_mapping sym None)
+                                    composite_mapping := (StrMap.add sym None !composite_mapping);
                               )
                           )) (snd l))
         | Errors.Error _ -> printf "ERROR making mapping!"; ())
 
-    ) !list_c_files; print_hashtbl !sym_mapping
+    ) !list_c_files
 
 let tool_name = "CompCert AST generator"
 
@@ -184,24 +169,24 @@ let compile_c_file sourcename ifile ofile =
   set_dest PrintClight.destination option_dclight ".light.c";
   set_dest PrintRustLight.destination option_drustlight ".light.rs";
   let cs = parse_c_file sourcename ifile in
-  let regular_sym_mapping = convert_mapping !sym_mapping in
-  let regular_composite_mapping = convert_mapping1 !composite_mapping in
-
-  let module_name = String.sub sourcename 0 ((String.length sourcename) - 2) in
+  let module_name =
+    String.sub sourcename 0 ((String.length sourcename) - 2)
+    |> String.to_seq |> List.of_seq
+  in
 
   match !option_mode with
   | Mode_Csyntax -> export_csyntax sourcename cs ofile
   | Mode_Clight  -> export_clight sourcename cs ofile
   | Mode_Rustlight -> (
       match
-        (Compiler.print_r_program regular_sym_mapping regular_composite_mapping
-               (String.to_seq module_name |> List.of_seq) cs) with
+        (Compiler.print_r_program !sym_mapping !composite_mapping
+               module_name cs) with
       | Errors.OK rprog -> (
           let oc = open_out ofile in
           ExportRustLight.print_program
             (Format.formatter_of_out_channel oc) rprog ifile
-            regular_sym_mapping
-            regular_composite_mapping
+            !sym_mapping
+            !composite_mapping
             module_name
         )
       | Errors.Error msg -> printf "error! %s" (C2C.string_of_errmsg msg)

@@ -20,14 +20,16 @@ open Frontend
 open Assembler
 open Linker
 open Diagnostics
+open RustLight
 
 (* Name used for version string etc. *)
 let tool_name = "C verified compiler"
 
-let sym_mapping : ((string, string) Hashtbl.t) ref = ref (Hashtbl.create 7)
+(* (\* struct or union ident -> (file, defn) option  *\) *)
+let sym_mapping : (str_map_globals) ref = ref (StrMap.empty)
 
 (* struct or union ident -> (file, defn) option  *)
-let composite_mapping: ((string, ((string * Ctypes.composite_definition) option)) Hashtbl.t) ref = ref (Hashtbl.create 7)
+let composite_mapping : (str_map_composites) ref = ref (StrMap.empty)
 
 (* Optional sdump suffix *)
 let sdump_suffix = ref ".json"
@@ -49,21 +51,6 @@ let extract_globals sourcename =
   preprocess sourcename preproname;
   let csyntax = parse_c_file sourcename preproname in
   Compiler.get_exports csyntax
-
-let convert_mapping (tbl : (string, string) Hashtbl.t) : (char list * char list) list =
-  Hashtbl.fold
-    (fun key value acc ->
-      (String.to_seq key |> List.of_seq, String.to_seq value |> List.of_seq) :: acc)
-    tbl
-    []
-
-let convert_mapping1 (tbl: (string, (string * Ctypes.composite_definition) option) Hashtbl.t) =
-  Hashtbl.fold (
-    fun key opt acc ->
-      match opt with
-      | Some ((v, dfn)) -> (String.to_seq key |> List.of_seq, Some ((String.to_seq v |> List.of_seq), dfn)) :: acc
-      | None -> (String.to_seq key |> List.of_seq, None) :: acc
-  ) tbl []
 
 (* From CompCert C AST to asm *)
 
@@ -87,12 +74,13 @@ let compile_c_file sourcename ifile ofile =
   set_dest AsmToJSON.destination option_sdump !sdump_suffix;
   (* Parse the ast *)
   let csyntax = parse_c_file sourcename ifile in
-  let regular_sym_mapping = convert_mapping !sym_mapping in
-  let regular_composite_mapping = convert_mapping1 !composite_mapping in
 
-  let module_name = String.sub sourcename 0 ((String.length sourcename) - 2) in
+  let module_name =
+    String.sub sourcename 0 ((String.length sourcename) - 2) |> String.to_seq |> List.of_seq in
 
-  match (Compiler.print_r_program regular_sym_mapping regular_composite_mapping (String.to_seq module_name |> List.of_seq) csyntax) with
+  match
+    (Compiler.print_r_program !sym_mapping !composite_mapping module_name csyntax)
+  with
   | Errors.OK _rprog -> printf "translated!"
   | Errors.Error msg -> printf "error! %s" (C2C.string_of_errmsg msg)
   ;
@@ -333,11 +321,6 @@ let num_input_files = ref 0
 
 let list_c_files = ref ([])
 
-let t_conv_fn = fun cl -> String.of_seq (List.to_seq cl)
-
-let char_list_list_to_string_list (cll : char list list) : string list =
-  List.map t_conv_fn cll
-
 let print_string_list lst =
   print_string "[";
   List.iter (fun x -> Printf.printf "\"%s\"; " x) lst;
@@ -383,18 +366,20 @@ let generate_mapping unit =
   (* symbol -> module in rust that exports it *)
   List.iter
     (fun file_name ->
-       let module_name = String.sub file_name 0 ((String.length file_name) - 2) in
+       let module_name = String.sub file_name 0 ((String.length file_name) - 2) |> String.to_seq |> List.of_seq in
        let glob_list = extract_globals file_name in
        (match glob_list with
         | Errors.OK l -> (List.iter
                            (fun symbol ->
-                              Hashtbl.add !sym_mapping symbol module_name) (char_list_list_to_string_list (fst l))
+                              sym_mapping := StrMap.add symbol module_name !sym_mapping;) (fst l)
                           ;
-                          List.iter (fun (sym_chars, dfn) -> (
-                              let sym = t_conv_fn sym_chars in
-                              match Hashtbl.find_opt !composite_mapping sym with
+                          List.iter (fun (sym, dfn) -> (
+                              match StrMap.find sym !composite_mapping with
                               (* first occurence *)
-                              | None -> Hashtbl.replace !composite_mapping sym (Some((module_name, dfn)))
+                              | None ->
+                                (
+                                  composite_mapping := StrMap.add sym (Some((module_name, dfn))) !composite_mapping;
+                                )
                               (* set to none explicitly, do nothing *)
                               | Some (None) -> printf "UUID explicitly setting to NONE\n"; ()
                               | Some (Some (f, dfn_old)) -> (
@@ -403,12 +388,13 @@ let generate_mapping unit =
                                   if not (comp_eq dfn dfn_old) then
                                     (* printf "sou is struct: %b, sou_o is struct %b" (sou == Ctypes.Struct) (sou_o == Ctypes.Union); *)
                                     (* printf "UUID inequal for %s with %b %b %b, replacing!\n" sym (sou = sou_o) (mems = mems_o) (attrs = attrs_o) ; *)
-                                    (Hashtbl.replace !composite_mapping sym None)
+                                    composite_mapping := (StrMap.add sym None !composite_mapping);
                               )
                           )) (snd l))
         | Errors.Error _ -> printf "ERROR making mapping!"; ())
 
-    ) !list_c_files; print_hashtbl !sym_mapping
+    ) !list_c_files
+  (* print_hashtbl !sym_mapping; *)
 
 let cmdline_actions =
   let f_opt name ref =
@@ -555,12 +541,12 @@ let cmdline_actions =
 let create_toml unit =
   let oc = open_out "Cargo.toml" in  (* Open the file for writing *)
   let maybe_bin =
-    match Hashtbl.find_opt !sym_mapping "main" with
+    match StrMap.find ("main" |> String.to_seq |> List.of_seq) !sym_mapping with
     | Some main_name ->
 {|
 [[bin]]
 name = "main"
-path = "./src/|} ^ main_name ^ ".rs\""
+path = "./src/|} ^ (main_name |> List.to_seq |> String.of_seq) ^ ".rs\""
     | None -> ""
   in
   (* TODO is there a less ugly way to do this without carrying the whitespace? *)

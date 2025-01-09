@@ -30,6 +30,17 @@ Module PositiveSet <: FSets.FSetInterface.S := FSets.FSetPositive.PositiveSet.
 Print Module PositiveSet.
 Print PositiveSet.elt.
 
+Require Import Coq.Strings.String.
+Require Import Coq.Structures.OrderedTypeEx.  (* For String_as_OT *)
+Require Import Coq.FSets.FMapList.
+Module StrMap := Coq.FSets.FMapList.Make(String_as_OT).
+Print StrMap.
+Definition str_map_globals := StrMap.t string.
+Definition str_map_composites := StrMap.t (option (string * Ctypes.composite_definition)).
+
+
+
+
 (* TODO *)
 (* - precedence *)
 (* - across the board handle attributes*)
