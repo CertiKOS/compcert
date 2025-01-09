@@ -78,6 +78,7 @@ Require Import Compopts.
 (** Pretty-printers (defined in Caml). *)
 Parameter print_Clight: Clight.program -> unit.
 Parameter print_Rustlight:
+  RustLight.PositiveSet.t ->
   list (string * string)
   -> (list (string * (option (string * Ctypes.composite_definition))))
   -> string -> RustLight.r_program -> unit.
@@ -194,7 +195,7 @@ Definition print_r_program
   OK p
   @@@ SimplExpr.transl_program
   @@@ RustLight.transl_program
-  @@ print (print_Rustlight sym_mapping composite_mapping name)
+  @@ print (print_Rustlight (RustLight.PositiveSet.empty) sym_mapping composite_mapping name)
   @@@ identity_rprog.
 
 

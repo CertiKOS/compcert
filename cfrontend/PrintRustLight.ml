@@ -785,7 +785,7 @@ let [@warning "-42"] gen_imports
        | _id, Gfun f -> (
            match f with
            | Internal rf -> (
-               get_fn_foreign_syms sym_mapping (List.map fst (Maps.PTree.elements rf.fn_imports)) acc
+               get_fn_foreign_syms sym_mapping (PositiveSet.elements rf.fn_imports) acc
              )
            | External _ -> acc
        )
@@ -900,6 +900,8 @@ let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_de
 
 
 let print_if
+
+    (sym_mapping: RustLight.PositiveSet.t)
     (clunky_sym_mapping: (char list * char list) list)
     (clunky_composite_mapping: (char list * ((char list * Ctypes.composite_definition) option)) list)
     (clunky_mod_name: char list)

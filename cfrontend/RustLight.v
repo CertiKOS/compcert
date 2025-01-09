@@ -20,8 +20,15 @@ Local Open Scope error_monad_scope.
 Print Ctypes.program.
 Locate Genv.t.
 
+(* Require Import FSets. *)
+(* Require Import FMaps. *)
+
 
 Print Ctypes.prog_public.
+
+Module PositiveSet <: FSets.FSetInterface.S := FSets.FSetPositive.PositiveSet.
+Print Module PositiveSet.
+Print PositiveSet.elt.
 
 (* TODO *)
 (* - precedence *)
@@ -71,6 +78,8 @@ Local Open Scope gensym_monad_scope_2.
 
 Print composite_env. (* things in scope *)
 Print composite.
+Locate unary_operation.
+Print unary_operation.
 
 
 
@@ -167,6 +176,8 @@ with check_typelist(tl : typelist) : res (unit) :=
       check_typelist tl
   end.
 
+(* I'm keeping this around if in the future we wish to support
+   multiple calling conventions. But for now, we only support one (SYSV) *)
 Record r_calling_convention : Type := mkcallconv { cc_structret: bool }.
 
 (* TODO rename to be consistent *)
@@ -217,9 +228,9 @@ Record r_function : Type := mkrfunction {
   fn_body: rstatement;
   (* the external symbols that are used*)
   (* we use this in printing exports*)
-  fn_imports: PTree.t unit;
+  fn_imports: PositiveSet.t;
 
-  (* TODO drop *)
+  (* TODO not used, get rid of it *)
   fn_is_safe: bool;
 }.
 
@@ -1160,7 +1171,7 @@ Definition empty_r_fn : r_function := {|
                                  fn_vars := nil;
                                  fn_temps := nil;
                                  fn_body := S_skip;
-                                 fn_imports := PTree.empty _;
+                                 fn_imports := PositiveSet.empty;
                                  fn_is_safe := false;
                                |}.
 
@@ -1246,84 +1257,77 @@ Definition reconstruct_generator (trail: list (ident * type)) : SimplExpr.genera
   in
   SimplExpr.mkgenerator max_ident trail.
 
-Print rstatement.
+Print PositiveSet.
 
-Definition merge_trees (a: PTree.t unit) (b: PTree.t unit) : PTree.t unit :=
-  PTree.fold (fun (acc: PTree.t unit) (id: ident) (_unit : unit) => PTree.set id tt acc) a b.
-
-  (* get ids tree 1*)
-  (* get ids tree 2*)
-  (* map them into new tree *)
-
-Fixpoint walk_r_expr_for_symbols (in_scope_syms: PTree.t unit) (expr: rexpr) : PTree.t unit :=
+(* get ids tree 1*)
+(* get ids tree 2*)
+(* map them into new tree *)
+Fixpoint walk_r_expr_for_symbols (in_scope_syms: PositiveSet.t) (expr: rexpr) : PositiveSet.t :=
   let walk_r_expr := walk_r_expr_for_symbols in_scope_syms in
   match expr with
     | Evar id _ =>
-        match PTree.get id in_scope_syms with
-        | None => PTree.set id tt (PTree.empty _)
-        | Some tt => PTree.empty _
-        end
+        if (PositiveSet.mem id in_scope_syms) then
+          PositiveSet.empty
+        else PositiveSet.singleton id
     | Ederef exp _ => walk_r_expr exp
     | Eaddrof exp _ => walk_r_expr exp
     | Eunop _ exp _ => walk_r_expr exp
-    | Ebinop _ exp1 exp2 _ty => merge_trees (walk_r_expr exp1) (walk_r_expr exp2)
+    | Ebinop _ exp1 exp2 _ty => PositiveSet.union (walk_r_expr exp1) (walk_r_expr exp2)
     | Ecast exp _ty => walk_r_expr exp
     | Efield exp _id _ty => walk_r_expr exp
-    | _ => PTree.empty _
+    | _ => PositiveSet.empty
   end.
 
-Fixpoint handle_exprs (in_scope_syms: PTree.t unit) (stmts: list rexpr) : PTree.t unit :=
+Fixpoint handle_exprs (in_scope_syms: PositiveSet.t ) (stmts: list rexpr) : PositiveSet.t :=
   match stmts with
-  | nil => PTree.empty _
-  | a :: b => merge_trees (walk_r_expr_for_symbols in_scope_syms a) (handle_exprs in_scope_syms b)
+  | nil => PositiveSet.empty
+  | a :: b =>
+      PositiveSet.union
+        (walk_r_expr_for_symbols in_scope_syms a)
+        (handle_exprs in_scope_syms b)
   end.
 
-Locate PTree.
-
-
-(* TODO instead of doing all this symbol pushing I can simply *)
-(* use ce.genv_defs to check symbol defns when constructing this *)
-(* TODO rename *)
-Fixpoint walk_r_body_for_symbols (in_scope_syms: PTree.t unit) (stmt: rstatement) : PTree.t unit :=
+Fixpoint walk_r_body_for_symbols
+  (in_scope_syms: PositiveSet.t)
+  (stmt: rstatement)
+  : PositiveSet.t :=
   let walk_r_expr := walk_r_expr_for_symbols in_scope_syms in
   let walk_r_stmt := walk_r_body_for_symbols in_scope_syms in
   match stmt with
-  | S_skip => PTree.empty _
-  | S_assign rexpr_1 rexpr_2 => merge_trees (walk_r_expr rexpr_1) (walk_r_expr rexpr_2)
-  (* | S_assign rexpr_1 rexpr_2 => merge_trees (PTree.empty _) (PTree.empty _) *)
+  | S_skip => PositiveSet.empty
+  | S_assign rexpr_1 rexpr_2 => PositiveSet.union (walk_r_expr rexpr_1) (walk_r_expr rexpr_2)
   | S_set id_1 rexpr =>
-      (* walk_r_expr rexpr *)
       (
         let t1 :=
-        match PTree.get id_1 in_scope_syms with
-        | None => PTree.set id_1 tt (PTree.empty _)
-        | Some tt => PTree.empty _
-        end in
-        merge_trees t1 (walk_r_expr rexpr)
+          if PositiveSet.mem id_1 in_scope_syms
+          then PositiveSet.empty
+          else PositiveSet.singleton id_1
+        in
+        PositiveSet.union t1 (walk_r_expr rexpr)
       )
-  | S_sequence s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
-  | S_continue _ => PTree.empty _
-  | S_loop _ s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
-  | S_loop2 _ _ s_1 s_2 => merge_trees (walk_r_stmt s_1) (walk_r_stmt s_2)
+  | S_sequence s_1 s_2 => PositiveSet.union (walk_r_stmt s_1) (walk_r_stmt s_2)
+  | S_continue _ => PositiveSet.empty
+  | S_loop _ s_1 s_2 => PositiveSet.union (walk_r_stmt s_1) (walk_r_stmt s_2)
+  | S_loop2 _ _ s_1 s_2 => PositiveSet.union (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_match_int rexpr ls =>
-      merge_trees (walk_r_expr rexpr) (handle_ls_stmt in_scope_syms (ls))
-  | S_builtin _ _ _ _ => PTree.empty _
-  | S_if_then_else rexpr rstmt_1 rstmt_2 => merge_trees (merge_trees (walk_r_expr rexpr) (walk_r_stmt rstmt_1)) (walk_r_stmt rstmt_2)
-  | S_break _int => PTree.empty _
+      PositiveSet.union (walk_r_expr rexpr) (handle_ls_stmt in_scope_syms (ls))
+  | S_builtin _ _ _ _ => PositiveSet.empty
+  | S_if_then_else rexpr rstmt_1 rstmt_2 => PositiveSet.union (PositiveSet.union (walk_r_expr rexpr) (walk_r_stmt rstmt_1)) (walk_r_stmt rstmt_2)
+  | S_break _int => PositiveSet.empty
   | S_return maybe_rexpr =>
       match maybe_rexpr with
       | Some (rexpr, _ty) => (walk_r_expr rexpr)
-      | None => PTree.empty _
+      | None => PositiveSet.empty
       end
   (* TODO think about shadowing. Might need to ensure there's no other variable, but can easily do this with function metadata *)
-  (* TODO this is possible in the case of a function pointer in which case we don't need to import anything *)
-  | S_call _ r_expr l_rexpr => merge_trees (handle_exprs in_scope_syms l_rexpr) (walk_r_expr r_expr)
+  (* TODO this is possible in the case of a function pointer in which case we don't need to import anything. Should verify this to be the case, though *)
+  | S_call _ r_expr l_rexpr => PositiveSet.union (handle_exprs in_scope_syms l_rexpr) (walk_r_expr r_expr)
   | S_exit r_expr => walk_r_expr r_expr
   end
-with handle_ls_stmt (in_scope_syms: PTree.t unit) (ls: labeled_rstatements) : PTree.t unit :=
+with handle_ls_stmt (in_scope_syms: PositiveSet.t) (ls: labeled_rstatements) : PositiveSet.t :=
   match ls with
-  | LSnil stmt => merge_trees (walk_r_body_for_symbols in_scope_syms stmt) (PTree.empty _)
-  | LScons _ rstatement ls => merge_trees (walk_r_body_for_symbols in_scope_syms rstatement) (handle_ls_stmt in_scope_syms ls)
+  | LSnil stmt => walk_r_body_for_symbols in_scope_syms stmt
+  | LScons _ rstatement ls => PositiveSet.union (walk_r_body_for_symbols in_scope_syms rstatement) (handle_ls_stmt in_scope_syms ls)
   end.
 
 
@@ -1340,6 +1344,8 @@ Fixpoint nat_to_string (n : nat) : string :=
   | 0%nat => "0"
   | S p => "0" ++ (nat_to_string (p))
   end.
+
+Print PositiveSet.
 
 Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_syms: list ident) : res r_function :=
   let return_type := (Clight.fn_return f) in
@@ -1377,22 +1383,23 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
       (* not variadic *)
       | None => (
           let in_scope_symbols := (map fst f.(Clight.fn_vars)) ++ (map fst f.(Clight.fn_params)) ++ (map fst tmp_vars) ++ glob_syms in
-          let in_scope_symbols_tree := fold_left (fun (acc : PTree.t unit) (elt: ident) => PTree.set elt tt acc)
-                                         in_scope_symbols (PTree.empty _) in
+          let in_scope_symbols_tree := fold_left (fun (acc : PositiveSet.t) (elt: ident) => PositiveSet.add elt acc)
+                                         in_scope_symbols (PositiveSet.empty) in
           let len := List.length in_scope_symbols in
 
 
-          let sanity_check :=
-            fold_left (fun (acc : bool) (elt: ident) =>
-              match PTree.get elt in_scope_symbols_tree with
-              | Some(tt) => acc
-              | None => false
-              end
-              )
-              in_scope_symbols
-              (true) in
-          match sanity_check with
-          | true =>
+          (* TODO this can be removed *)
+          (* let sanity_check := *)
+          (*   fold_left (fun (acc : bool) (elt: ident) => *)
+          (*     match PositiveSet.get elt in_scope_symbols_tree with *)
+          (*     | Some(tt) => acc *)
+          (*     | None => false *)
+          (*     end *)
+          (*     ) *)
+          (*     in_scope_symbols *)
+          (*     (true) in *)
+          (* match sanity_check with *)
+          (* | true => *)
               (* Error(msg ("number of symbols: " ++ (nat_to_string len))) *)
             OK({|
                   fn_return := return_type;
@@ -1406,8 +1413,9 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
                   (* fn_imports := (PTree.empty _); *)
                   fn_is_safe := false;
                 |})
-          | false => Error(msg "sanity check failed")
-        end)
+        (*   | false => Error(msg "sanity check failed") *)
+        (* end) *)
+      )
       end
   end.
 
@@ -1475,7 +1483,7 @@ Definition gen_new_main'
                 nil
                 (cons (exit_ident, exit_ty) nil)
                 (S_sequence s1 s2)
-                (PTree.empty _)
+                (PositiveSet.empty)
                 true
               )
 
