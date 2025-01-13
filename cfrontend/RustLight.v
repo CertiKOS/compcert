@@ -146,8 +146,6 @@ Definition bang_type := Ctypes.Tint I32 Signed Ctypes.noattr.
 Definition bang_type_unsigned := Ctypes.Tint I32 Unsigned Ctypes.noattr.
 Definition cond_type := Ctypes.Tint IBool Unsigned Ctypes.noattr.
 
-
-
 Locate unary_operation.
 
 Search binary_operation.
@@ -432,6 +430,16 @@ Inductive needs_coersion : Type :=
 
 
 
+Definition gen_zero_const_clight (ty: type) : res Clight.expr :=
+  match ty with
+  | Ctypes.Tlong _ _ => OK(Clight.Econst_long (Int64.repr 0) ty)
+  | Ctypes.Tint _ _ _ => OK(Clight.Econst_int (Int.repr 0) ty)
+  | Ctypes.Tfloat Ctypes.F64 _ => OK(Clight.Econst_float (Bits.b64_of_bits 0%Z) ty)
+  | Ctypes.Tfloat Ctypes.F32 _ => OK(Clight.Econst_single (Bits.b32_of_bits 0%Z) ty)
+  (* TODO not immediately needed but should add in null pointer*)
+  | ty => Error (msg (String.append "Encountered unexpected type that has no zero constant" (type_to_string ty)))
+  end
+  .
 
 
 Definition gen_zero_const (ty: type) : res rexpr :=
@@ -666,7 +674,7 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   end.
 
 (* NOTE: CE is just types *)
-Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
+Fixpoint transl_syntax_expr (ce: composite_env) (a: Clight.expr) {struct a}
   : SimplExpr.mon (rexpr) :=
   match a with
   | Clight.Econst_int n ty =>
@@ -683,35 +691,105 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
       SimplExpr.ret(Econst_long n ty)
   | Clight.Evar id ty =>
       gdom _ <- check_ty ty;
-      let res := Evar id ty in
-      SimplExpr.ret(match ty with
-      | Tarray ty' _ a => Ecast res (Tpointer ty' a)
-      | _ => res
-      end)
+      SimplExpr.ret(Evar id ty)
   | Clight.Etempvar id ty =>
       gdom _ <- check_ty ty;
-      let res := Etempvar id ty in
-      SimplExpr.ret(match ty with
-      | Tarray ty' _ a => Ecast res (Tpointer ty' a)
-      | _ => res
-      end)
-
+      SimplExpr.ret(Etempvar id ty)
   | Clight.Ederef b ty =>
       gdom _ <- check_ty ty;
-      gdo tb <- transl_expr ce b;
+      gdo tb <- transl_syntax_expr ce b;
       SimplExpr.ret(Ederef tb ty)
   | Clight.Eaddrof b ty =>
       gdom _ <- check_ty ty;
-      gdo tb <- transl_expr ce b;
+      gdo tb <- transl_syntax_expr ce b;
       SimplExpr.ret(Eaddrof tb ty)
   | Clight.Eunop op exp ty =>
       gdom _ <- check_ty ty;
-      let exp_typ := Clight.typeof exp in
-      gdo translated_exp <- transl_expr ce exp;
-      (* for the most part: compare to 0 value of the type, then the output is a bool.
-         then cast to an int as required by c99 standard *)
+      gdo translated_exp <- transl_syntax_expr ce exp;
+      SimplExpr.ret(Eunop op translated_exp ty)
+  | Clight.Ebinop op exp1 exp2 ty =>
+      gdom _ <- check_ty ty;
+      gdo rexp1 <- transl_syntax_expr ce exp1;
+      gdo rexp2 <- transl_syntax_expr ce exp2;
+      SimplExpr.ret(Ebinop op rexp1 rexp2 ty)
+  | Clight.Ecast exp ty =>
+      gdom _ <- check_ty ty;
+      gdo rexp <- transl_syntax_expr ce exp;
+      SimplExpr.ret(Ecast rexp ty)
+  | Clight.Efield exp ident ty =>
+      gdom _ <- check_ty ty;
+      gdo rexp <- transl_syntax_expr ce exp;
+      SimplExpr.ret(Efield rexp ident ty)
+  | Clight.Esizeof ty' ty =>
+      gdom _ <- check_ty ty;
+      SimplExpr.ret(Esizeof ty' ty)
+  | Clight.Ealignof ty' ty =>
+      gdom _ <- check_ty ty;
+      SimplExpr.ret(Ealignof ty' ty)
+  end.
+
+Print SimplExpr.transl_stmt.
+
+Record s_md : Type :=
+  mk_s_md {
+      get_var_type: ident -> res type;
+      ce: composite_env;
+      tyret: type;
+      nbrk: nat;
+      ncnt: nat;
+      cur_loop_lbl: option Z;
+      cur_switch_lbl: option Z;
+      next_lbl: option Z;
+      (* return type of the function *)
+      f_rty: type;
+    }.
+
+Print ce.
+
+Fixpoint insert_cast_expr (e: rexpr) : SimplExpr.mon (rexpr)
+  :=
+  match e with
+  | Econst_int _n _ty
+  | Econst_single _n _ty
+  | Econst_long _n _ty
+  | Econst_float _n _ty =>
+      SimplExpr.ret(e)
+  (* add in a cast if we need to decay an array down to a pointer *)
+  | Evar id ty
+  | Etempvar id ty =>
+      match ty with
+      | Tarray ty' _ a => SimplExpr.ret(Ecast e (Tpointer ty' a))
+      | _ => SimplExpr.ret(e)
+      end
+  | Ederef b ty =>
+      gdo tb <- insert_cast_expr b;
+      SimplExpr.ret(Ederef tb ty)
+  | Eaddrof b ty =>
+      gdo tb <- insert_cast_expr b;
+      SimplExpr.ret(Eaddrof tb ty)
+  | Efield exp ident ty =>
+      gdo texp <- insert_cast_expr exp;
+      SimplExpr.ret(Efield texp ident ty)
+
+  | Ecast exp ty =>
+      gdo texp <- insert_cast_expr exp;
+      match ty with
+      | Ctypes.Tint IBool _ _ =>
+          let cur_ty := r_typeof exp in
+          gdom zero_const <- gen_zero_const cur_ty;
+          SimplExpr.ret(Ebinop Ogt texp zero_const ty)
+      | _ => SimplExpr.ret(Ecast texp ty)
+      end
+  (* TODO I assume that this is fine. We might need to insert a cast maybe? *)
+  | Esizeof ty' ty
+  | Ealignof ty' ty =>
+      SimplExpr.ret(e)
+
+  | Eunop op exp ty =>
+      let exp_typ := r_typeof exp in
+      gdo texp <- insert_cast_expr exp;
       let builder := (fun c =>
-        SimplExpr.ret(Ecast (Ebinop Oeq translated_exp c cond_type) bang_type)
+        SimplExpr.ret(Ecast (Ebinop Oeq texp c cond_type) bang_type)
       ) in
       (* have to expand bool cast to if else statement *)
       match op with
@@ -740,18 +818,19 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
             builder c
           )
           | Ctypes.Tpointer _ _ => (
-            SimplExpr.ret( Ecast (Enull_check translated_exp) bang_type )
+            SimplExpr.ret( Ecast (Enull_check texp) bang_type )
           )
           (* TODO consider the array type *)
           (* TODO how are arrays handled*)
           | _ => SimplExpr.error( msg "invalid type passed into ! expression. Expected scalar or pointer type.")
           end
-      | _ => SimplExpr.ret(Eunop op translated_exp ty)
+      | _ => SimplExpr.ret(Eunop op texp ty)
       end
-  | Clight.Ebinop op exp1 exp2 ty =>
+
+  | Ebinop op exp1 exp2 ty =>
       gdom _ <- check_ty ty;
-      gdo rexp1 <- transl_expr ce exp1;
-      gdo rexp2 <- transl_expr ce exp2;
+      gdo rexp1 <- insert_cast_expr exp1;
+      gdo rexp2 <- insert_cast_expr exp2;
       gdo (c_rexp1, c_rexp2, rty) <-
         match do_binop_coersion (r_typeof rexp1) (r_typeof rexp2) with
         | NC_first f rty =>
@@ -782,52 +861,17 @@ Fixpoint transl_expr (ce: composite_env) (a: Clight.expr) {struct a}
       else
         let final_binop := Ebinop op c_rexp1 c_rexp2 rty in
         i2etc (r_typeof final_binop) (ty) final_binop
-  | Clight.Ecast exp ty =>
-      gdom _ <- check_ty ty;
-      gdo rexp <- transl_expr ce exp;
 
-      match ty with
-      | Ctypes.Tint IBool _ _ =>
-          let cur_ty := r_typeof rexp in
-          gdom zero_const <- gen_zero_const cur_ty;
-          SimplExpr.ret(Ebinop Ogt rexp zero_const ty)
-      | _ => SimplExpr.ret(Ecast rexp ty)
-      end
-  | Clight.Efield exp ident ty =>
-      gdom _ <- check_ty ty;
-      gdo rexp <- transl_expr ce exp;
-      SimplExpr.ret(Efield rexp ident ty)
-  | Clight.Esizeof ty' ty =>
-      gdom _ <- check_ty ty;
-      SimplExpr.ret(Esizeof ty' ty)
-  | Clight.Ealignof ty' ty =>
-      gdom _ <- check_ty ty;
-      SimplExpr.ret(Ealignof ty' ty)
+  (* this shouldn't exist *)
+  | Enull_check _ty => SimplExpr.ret(e)
   end.
 
-Print SimplExpr.transl_stmt.
-
-Record s_md : Type :=
-  mk_s_md {
-      get_var_type: ident -> res type;
-      ce: composite_env;
-      tyret: type;
-      nbrk: nat;
-      ncnt: nat;
-      cur_loop_lbl: option Z;
-      cur_switch_lbl: option Z;
-      next_lbl: option Z;
-      (* return type of the function *)
-      f_rty: type;
-    }.
-
-Print ce.
 
 
 
 Locate int.
 
-Fixpoint transl_arglist
+Fixpoint transl_syntax_arglist
   (ce: composite_env)
   (al: list Clight.expr)
   {struct al}:
@@ -835,15 +879,27 @@ Fixpoint transl_arglist
   match al with
   | nil => SimplExpr.ret(nil)
   | a1 :: a2 =>
-      gdo arg <- transl_expr ce a1 ;
-      gdo args <- transl_arglist ce a2 ;
-      SimplExpr.ret((Ecast arg bang_type):: args)
+      gdo arg <- transl_syntax_expr ce a1 ;
+      gdo args <- transl_syntax_arglist ce a2 ;
+      SimplExpr.ret(arg :: args)
+  end.
+
+Fixpoint insert_cast_arglist
+  (al: list rexpr)
+  {struct al}:
+  SimplExpr.mon (list rexpr) :=
+  match al with
+  | nil => SimplExpr.ret(nil)
+  | a1 :: a2 =>
+      gdo arg <- insert_cast_expr a1 ;
+      gdo args <- insert_cast_arglist a2 ;
+      SimplExpr.ret((Ecast arg bang_type) :: args)
   end.
 
 
 Print typelist.
 
-Fixpoint transl_arglist_with_ty_info
+Fixpoint transl_syntax_arglist_with_ty_info
   (ce: composite_env)
   (al: list Clight.expr)
   (tyl: typelist)
@@ -855,15 +911,41 @@ Fixpoint transl_arglist_with_ty_info
       match tyl with
       | Tnil =>
         (
-          gdo arg <- transl_expr ce a1 ;
-          gdo args <- transl_arglist_with_ty_info ce a2 Tnil ;
+          gdo arg <- transl_syntax_expr ce a1 ;
+          gdo args <- transl_syntax_arglist_with_ty_info ce a2 Tnil ;
           SimplExpr.ret(arg :: args)
         )
       | Tcons ty tyl' =>
       (
-          gdo arg <- transl_expr ce a1 ;
+          gdo arg <- transl_syntax_expr ce a1 ;
+          (* TODO laso don't need this *)
+          (* gdo casted_arg <- i2etc (r_typeof arg) ty arg ; *)
+          gdo args <- transl_syntax_arglist_with_ty_info ce a2 tyl';
+          SimplExpr.ret(arg :: args)
+      )
+      end
+  end.
+
+Fixpoint insert_cast_arglist_with_ty_info
+  (al: list rexpr)
+  (tyl: typelist)
+  {struct al}:
+  SimplExpr.mon (list rexpr) :=
+  match al with
+  | nil => SimplExpr.ret(nil)
+  | a1 :: a2 =>
+      match tyl with
+      | Tnil =>
+        (
+          gdo arg <- insert_cast_expr a1 ;
+          gdo args <- insert_cast_arglist_with_ty_info a2 Tnil ;
+          SimplExpr.ret(arg :: args)
+        )
+      | Tcons ty tyl' =>
+      (
+          gdo arg <- insert_cast_expr a1 ;
           gdo casted_arg <- i2etc (r_typeof arg) ty arg ;
-          gdo args <- transl_arglist_with_ty_info ce a2 tyl';
+          gdo args <- insert_cast_arglist_with_ty_info a2 tyl';
           SimplExpr.ret(casted_arg :: args)
       )
       end
@@ -871,7 +953,7 @@ Fixpoint transl_arglist_with_ty_info
 
 Print typelist.
 
-Fixpoint transl_statement
+Fixpoint transl_syntax_statement
   (md : s_md)
   (s: Clight.statement) {struct s}
   : SimplExpr.mon rstatement
@@ -891,41 +973,31 @@ Fixpoint transl_statement
     | Clight.Sskip => SimplExpr.ret (S_skip)
     | Clight.Sassign lval rval =>
         (* gdo r_val <- *)
-          gdo r_lval <- transl_expr ce lval;
-          gdo r_rval <- transl_expr ce rval;
-          gdo coerced_type <- i2etc (r_typeof r_rval) (r_typeof r_lval) (r_rval) ;
-          let s := nuke_equalities coerced_type in
+          gdo r_lval <- transl_syntax_expr ce lval;
+          gdo r_rval <- transl_syntax_expr ce rval;
           let gen_res := fun (e: rexpr) => S_assign r_lval e in
-          process_expr s gen_res
-          (* sometimes the types do not match *)
+          process_expr r_rval gen_res
         (* SimplExpr.ret r_val *)
-    | Clight.Sifthenelse exp s1 s2 =>
-        gdo cond <- transl_expr ce exp;
-        gdo casted_cond <- gen_cast_for_conditional cond;
-        let s_cond := nuke_equalities casted_cond in
-        gdo r_s1 <- transl_statement md s1;
-        gdo r_s2 <- transl_statement md s2;
-        let gen_res := fun (e: rexpr) => S_if_then_else e r_s1 r_s2 in
-        process_expr s_cond gen_res
     | Clight.Sset x exp =>
-        gdo r_exp <- transl_expr ce exp;
-        gdom expected_type <- get_var_type x;
-        gdo casted_exp <- i2etc (r_typeof r_exp) expected_type r_exp ;
-        let s_casted_exp := nuke_equalities casted_exp in
+        gdo r_exp <- transl_syntax_expr ce exp;
         let gen_res := fun (e: rexpr) => S_set x e in
-        process_expr s_casted_exp gen_res
+        process_expr r_exp gen_res
+    | Clight.Sifthenelse exp s1 s2 =>
+        gdo cond <- transl_syntax_expr ce exp;
+        gdo r_s1 <- transl_syntax_statement md s1;
+        gdo r_s2 <- transl_syntax_statement md s2;
+        let gen_res := fun (e: rexpr) => S_if_then_else e r_s1 r_s2 in
+        process_expr cond gen_res
     | Clight.Ssequence exp1 exp2 =>
-        gdo r_exp1 <- transl_statement md exp1;
-        gdo r_exp2 <- transl_statement md exp2;
+        gdo r_exp1 <- transl_syntax_statement md exp1;
+        gdo r_exp2 <- transl_syntax_statement md exp2;
         SimplExpr.ret (S_sequence r_exp1 r_exp2)
     | Clight.Sreturn None => SimplExpr.ret (S_return None)
     | Clight.Sreturn (Some exp) =>
         let exp_ty := Clight.typeof exp in
-        gdo r_exp <- transl_expr ce exp;
-        gdo casted_exp <- i2etc exp_ty f_rty r_exp ;
-        let s_casted_exp := nuke_equalities casted_exp in
+        gdo r_exp <- transl_syntax_expr ce exp;
         let gen_res := fun (e: rexpr) => S_return (Some (e, exp_ty)) in
-        process_expr s_casted_exp gen_res
+        process_expr r_exp gen_res
     (* TODO still need to handle casting and splitting expressions for this case *)
     | Clight.Sswitch exp stmts =>
       let exp_typ := Clight.typeof exp in
@@ -938,7 +1010,7 @@ Fixpoint transl_statement
         end in
       let dflt_case_val := Econst_int dflt_is_first dflt_case_ty in (*initial val *)
       gdo dflt_case_ident <- SimplExpr.gensym dflt_case_ty ;
-      gdo r_exp <- transl_expr ce exp ;
+      gdo r_exp <- transl_syntax_expr ce exp ;
       gdo exp_ident <- SimplExpr.gensym exp_typ;
       let exp_decl := S_set exp_ident r_exp in
 
@@ -983,16 +1055,16 @@ Fixpoint transl_statement
 
       SimplExpr.ret (S_sequence (S_sequence dflt_case_decl exp_decl) new_loop)
     | Clight.Scall x name al =>
-        gdo name' <- transl_expr ce name ;
+        gdo name' <- transl_syntax_expr ce name ;
         match r_typeof name' with
         | Tfunction tyl t cc =>
           (
-            gdo al' <- transl_arglist_with_ty_info ce al tyl;
+            gdo al' <- transl_syntax_arglist_with_ty_info ce al tyl;
             SimplExpr.ret (S_call x name' al')
           )
         | _ =>
           (
-            gdo al' <- transl_arglist ce al ;
+            gdo al' <- transl_syntax_arglist ce al ;
             SimplExpr.ret (S_call x name' al')
           )
         end
@@ -1020,7 +1092,7 @@ Fixpoint transl_statement
               f_rty := f_rty;
               get_var_type := get_var_type;
             |} in
-          gdo r_s2 <- transl_statement u_s_md_2 s2;
+          gdo r_s2 <- transl_syntax_statement u_s_md_2 s2;
           SimplExpr.ret( S_loop2 (Some(outer)) None S_skip r_s2)
         )
         (* finnicky so I'm bailing *)
@@ -1065,8 +1137,8 @@ Fixpoint transl_statement
               f_rty := f_rty;
               get_var_type := get_var_type;
             |} in
-          gdo r_s1 <- transl_statement u_s_md_1 s1;
-          gdo r_s2 <- transl_statement u_s_md_2 s2;
+          gdo r_s1 <- transl_syntax_statement u_s_md_1 s1;
+          gdo r_s2 <- transl_syntax_statement u_s_md_2 s2;
           SimplExpr.ret (S_loop2 (Some(outer)) (Some(inner)) (S_sequence r_s1 (S_break (Some(inner)))) r_s2)
         )
         end
@@ -1104,7 +1176,7 @@ with transl_switch
     (* normal case *)
     | Clight.LScons (Some cur_lbl) stmt ls =>
         (
-          gdo body <- transl_statement smd stmt;
+          gdo body <- transl_syntax_statement smd stmt;
           match ls with
           | Clight.LSnil =>
               SimplExpr.ret (dflt_stmt, LScons cur_lbl (S_sequence body (S_break cur_switch_lbl)) cases)
@@ -1125,7 +1197,7 @@ with transl_switch
     (* default case *)
     | Clight.LScons None stmt ls =>
         (
-          gdo body <- transl_statement smd stmt ;
+          gdo body <- transl_syntax_statement smd stmt ;
           match ls with
           (* no next statement. Default is last. Break after default *)
           | Clight.LSnil => SimplExpr.ret (S_sequence body (S_break cur_switch_lbl), cases)
@@ -1333,6 +1405,77 @@ with handle_ls_stmt (in_scope_syms: PositiveSet.t) (ls: labeled_rstatements) : P
   | LScons _ rstatement ls => PositiveSet.union (walk_r_body_for_symbols in_scope_syms rstatement) (handle_ls_stmt in_scope_syms ls)
   end.
 
+Fixpoint insert_cast_stmt (gvt_unapplied: (list (ident * type)) -> ident -> res type) (f_rty: type) (stmt: rstatement) : SimplExpr.mon rstatement :=
+  gdo new_tmps <- SimplExpr.get_trail tt;
+  let gvt := gvt_unapplied new_tmps in
+  match stmt with
+  | S_skip => SimplExpr.ret (S_skip)
+  | S_assign lval rval =>
+      gdo r_lval <- insert_cast_expr lval;
+      gdo r_rval <- insert_cast_expr rval;
+      gdo coerced_type <- i2etc (r_typeof r_rval) (r_typeof r_lval) (r_rval) ;
+      let s := nuke_equalities coerced_type in
+      SimplExpr.ret(S_assign r_lval s)
+      (* let gen_res := fun (e: rexpr) => S_assign r_lval e in *)
+      (* process_expr s gen_res *)
+  | S_set x exp =>
+      gdo r_exp <- insert_cast_expr exp;
+      gdom expected_type <- gvt x;
+      gdo casted_exp <- i2etc (r_typeof r_exp) expected_type r_exp ;
+      let s_casted_exp := nuke_equalities casted_exp in
+      SimplExpr.ret(S_set x s_casted_exp)
+      (* let gen_res := fun (e: rexpr) => S_set x e in *)
+      (* (* TODO evaluate if this is needed *) *)
+      (* process_expr s_casted_exp gen_res *)
+  | S_if_then_else exp s1 s2 =>
+      gdo cond <- insert_cast_expr exp;
+      gdo casted_cond <- gen_cast_for_conditional cond;
+      let s_cond := nuke_equalities casted_cond in
+      gdo r_s1 <- insert_cast_stmt gvt_unapplied f_rty s1;
+      gdo r_s2 <- insert_cast_stmt gvt_unapplied f_rty s2;
+      SimplExpr.ret(S_if_then_else s_cond r_s1 r_s2)
+  | S_sequence exp1 exp2 =>
+      gdo r_exp1 <- insert_cast_stmt gvt_unapplied f_rty exp1;
+      gdo r_exp2 <- insert_cast_stmt gvt_unapplied f_rty exp2;
+      SimplExpr.ret (S_sequence r_exp1 r_exp2)
+  | S_return None => SimplExpr.ret(stmt)
+  | S_return (Some (exp, ty)) =>
+    let exp_ty := r_typeof exp in
+    gdo r_exp <- insert_cast_expr exp;
+    gdo casted_exp <- i2etc exp_ty f_rty r_exp ;
+    let s_casted_exp := nuke_equalities casted_exp in
+    SimplExpr.ret(S_return (Some( (s_casted_exp, exp_ty) )))
+  (* implicit type coersion can happen in function args *)
+  | S_call x name al =>
+      gdo name' <- insert_cast_expr name ;
+      match r_typeof name' with
+      | Tfunction tyl t cc =>
+        (
+          gdo al' <- insert_cast_arglist_with_ty_info al tyl;
+          SimplExpr.ret (S_call x name' al')
+        )
+      | _ =>
+        (
+          gdo al' <- insert_cast_arglist al ;
+          SimplExpr.ret (S_call x name' al')
+        )
+      end
+  (* TODO this should be implemented *)
+  (* | S_switch exp stmts => *)
+  (*     SimplExpr.ret(stmt) *)
+  (* TODO not currently implemented *)
+  | S_builtin x ef tyargs bl => SimplExpr.error(msg "INVALID BUILTIN")
+  | S_loop l1 s1 s2 =>
+      gdo rs1 <- insert_cast_stmt gvt_unapplied f_rty s1;
+      gdo rs2 <- insert_cast_stmt gvt_unapplied f_rty s2;
+      SimplExpr.ret(S_loop l1 rs1 rs2)
+  | S_loop2 l1 l2 s1 s2 =>
+      gdo rs1 <- insert_cast_stmt gvt_unapplied f_rty s1;
+      gdo rs2 <- insert_cast_stmt gvt_unapplied f_rty s2;
+      SimplExpr.ret(S_loop2 l1 l2 rs1 rs2)
+  | _ => SimplExpr.ret(stmt)
+  end.
+
 
 Locate map.
 
@@ -1374,8 +1517,21 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
               f_rty := return_type;
               get_var_type := get_ty_of_var;
             |} in
-  let body := transl_statement smd (Clight.fn_body f) generator in
-  match body with
+  let translated_syntax_body := transl_syntax_statement smd (Clight.fn_body f) in
+
+  let get_ty_of_var_rust :=
+    (fun (tmps: list (ident * type)) (x: ident) =>
+     let search_fn  := (fun acc p => if ident_eq (fst p) x then OK(snd p) else acc) in
+     List.fold_left
+                search_fn
+                (f.(Clight.fn_params) ++  (f.(Clight.fn_vars)) ++ tmps)
+                (* TODO this does NOT handle global symbols. I need to worry about those by (1) propagating their type and (2) including them here. .*)
+                (* name is not sufficient*)
+                (Error(msg "Could not find variable referenced!"))
+    ) in
+  let inserted_cast_body :=
+    SimplExpr.bind translated_syntax_body (insert_cast_stmt get_ty_of_var_rust return_type) in
+  match inserted_cast_body generator with
   | SimplExpr.Err msg => Error msg
   | SimplExpr.Res r_body r_g i =>
       let tmp_vars := r_g.(SimplExpr.gen_trail) in
@@ -1496,8 +1652,6 @@ Definition gen_new_main'
   end.
 
 Print cons.
-
-Definition transl_casts (c_prog: Clight.program) : res Clight.program := OK(c_prog).
 
 Definition transl_program (c_prog: Clight.program) : res (r_program) :=
   (* symbols that we know to be in scope already *)

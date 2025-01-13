@@ -74,6 +74,12 @@ Definition gensym (ty: type): mon ident :=
         (mkgenerator (Pos.succ (gen_next g)) ((gen_next g, ty) :: gen_trail g))
         (Ple_succ (gen_next g)).
 
+Definition get_trail (x: unit): SimplExpr.mon (list (ident * type)) :=
+  fun (g: SimplExpr.generator) =>
+    Res (g.(gen_trail))
+        (g)
+        (Ple_refl (gen_next g)).
+
 (** Construct a sequence from a list of statements.  To facilitate the
    proof, the sequence is nested to the left and starts with a [Sskip]. *)
 
