@@ -1496,16 +1496,17 @@ Print PositiveSet.
 Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_syms: list ident) : res r_function :=
   let return_type := (Clight.fn_return f) in
   let generator := reconstruct_generator f.(Clight.fn_temps) in
-  let get_ty_of_var :=
-    (fun (x: ident) =>
+  let get_ty_of_var_rust :=
+    (fun (tmps: list (ident * type)) (x: ident) =>
      let search_fn  := (fun acc p => if ident_eq (fst p) x then OK(snd p) else acc) in
      List.fold_left
                 search_fn
-                (f.(Clight.fn_params) ++  (f.(Clight.fn_vars)) ++ f.(Clight.fn_temps))
+                (f.(Clight.fn_params) ++  (f.(Clight.fn_vars)) ++ tmps)
                 (* TODO this does NOT handle global symbols. I need to worry about those by (1) propagating their type and (2) including them here. .*)
                 (* name is not sufficient*)
                 (Error(msg "Could not find variable referenced!"))
     ) in
+  let get_ty_of_var := get_ty_of_var_rust (f.(Clight.fn_temps)) in
   let smd := {|
               ce := ce;
               tyret := return_type;
@@ -1519,16 +1520,6 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
             |} in
   let translated_syntax_body := transl_syntax_statement smd (Clight.fn_body f) in
 
-  let get_ty_of_var_rust :=
-    (fun (tmps: list (ident * type)) (x: ident) =>
-     let search_fn  := (fun acc p => if ident_eq (fst p) x then OK(snd p) else acc) in
-     List.fold_left
-                search_fn
-                (f.(Clight.fn_params) ++  (f.(Clight.fn_vars)) ++ tmps)
-                (* TODO this does NOT handle global symbols. I need to worry about those by (1) propagating their type and (2) including them here. .*)
-                (* name is not sufficient*)
-                (Error(msg "Could not find variable referenced!"))
-    ) in
   let inserted_cast_body :=
     SimplExpr.bind translated_syntax_body (insert_cast_stmt get_ty_of_var_rust return_type) in
   match inserted_cast_body generator with

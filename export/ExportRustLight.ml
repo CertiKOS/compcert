@@ -83,6 +83,11 @@ let rec expr fmt = function
       fprintf fmt "@[<hov 2>(Enull_check %a)@]"
          expr e
 
+let print_lbl fmt =
+  function
+  | Some lbl -> fprintf fmt "%a" coqint lbl
+  | None -> ()
+
 let rec stmt fmt = function
   | S_skip ->
       fprintf fmt "S_skip"
@@ -117,6 +122,10 @@ let rec stmt fmt = function
       fprintf fmt "@[<hv 2>(S_break %a)@]" (print_option coqZ) maybe_lbl
   | S_continue(maybe_lbl) ->
       fprintf fmt "@[<hv 2>(S_continue %a)@]" (print_option coqZ) maybe_lbl
+  | S_loop(lbl, s1, s2) ->
+      fprintf fmt "@[<hv 2>(Sloop@ %a@ %a@ %a)@]" print_lbl lbl stmt s1 stmt s2
+  | S_loop2(lbl1, lbl2, s1, s2) ->
+      fprintf fmt "@[<hv 2>(Sloop@ %a@ %a@ %a@ %a)@]" print_lbl lbl1 print_lbl lbl2 stmt s1 stmt s2
   (* TODO fix *)
   | _ ->
       fprintf fmt "unimplemented!"
