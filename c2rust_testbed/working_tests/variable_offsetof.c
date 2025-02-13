@@ -1,3 +1,6 @@
+// IDK why this is needed
+// https://stackoverflow.com/questions/13525774/clang-and-float128-bug-error
+typedef long double __float128;
 #include <stddef.h>
 
 typedef struct {

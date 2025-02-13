@@ -6,6 +6,9 @@ int test_fn_macro(int x) {
   return TEST_FN_MACRO(x);
 }
 
+// IDK why this is needed
+// https://stackoverflow.com/questions/13525774/clang-and-float128-bug-error
+typedef long double __float128;
 #include <stddef.h>
 #include <stdint.h>
 typedef  uint64_t U64;

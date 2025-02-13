@@ -953,6 +953,20 @@ Fixpoint insert_cast_arglist_with_ty_info
 
 Print typelist.
 
+Fixpoint split_expr_stmt (s: rstatement) {struct s}
+                         : SimplExpr.mon rstatement
+  :=
+    match s with
+    | S_skip => SimplExpr.ret (S_skip)
+    | S_assign lval rval =>
+        let gen_res := fun (e: rexpr) => S_assign lval rval in
+        process_expr rval gen_res
+    | S_set x exp =>
+        let gen_res := fun (e: rexpr) => S_set x e in
+        process_expr exp gen_res
+    | _ => SimplExpr.ret(s)
+end.
+
 Fixpoint transl_syntax_statement
   (md : s_md)
   (s: Clight.statement) {struct s}
@@ -1144,8 +1158,8 @@ Fixpoint transl_syntax_statement
         end
     | Clight.Sbreak => SimplExpr.ret (S_break cur_switch_lbl)
     | Clight.Scontinue => SimplExpr.ret (S_break cur_loop_lbl)
-    | Clight.Slabel lbl s => SimplExpr.error (msg "INVALID BUILTIN")
-    | Clight.Sgoto lbl => SimplExpr.error (msg "INVALID BUILTIN")
+    | Clight.Slabel lbl s => SimplExpr.error (msg "LABELS ARE INVALID")
+    | Clight.Sgoto lbl => SimplExpr.error (msg "GOTOS ARE INVALID")
   end
 end
 with transl_switch
@@ -1518,8 +1532,13 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
               f_rty := return_type;
               get_var_type := get_ty_of_var;
             |} in
-  let translated_syntax_body := transl_syntax_statement smd (Clight.fn_body f) in
 
+  (* we have three passes: *)
+  (* - translate the syntax *)
+  (* - make the implicit type conversion explicit *)
+  (* - perform expression splitting to ensure lifetime rules are enforced (aka no temporary lifetimes) (TODO see github issue ) *)
+  (* *)
+  let translated_syntax_body := transl_syntax_statement smd (Clight.fn_body f) in
   let inserted_cast_body :=
     SimplExpr.bind translated_syntax_body (insert_cast_stmt get_ty_of_var_rust return_type) in
   match inserted_cast_body generator with
@@ -1568,6 +1587,8 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
       )
       end
   end.
+
+(* Definition process_expr *)
 
 (* TODO forget external functions now. We don't care about them. *)
 Definition transl_fundef (ce: composite_env) (glob_syms: list ident) (id: ident) (fn : Clight.fundef) : res r_fundef :=
