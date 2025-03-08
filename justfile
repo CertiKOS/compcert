@@ -16,4 +16,6 @@ compile_custom_test *name:
 compile_custom_tests:
   pushd rust_tests && just clean && just compile_all && popd
 
+test:
+  pushd c2rust_testbed/working_tests && just clean && just compile_all && popd
 

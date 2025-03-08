@@ -18,6 +18,7 @@ Require Cshmgen.
 Local Open Scope error_monad_scope.
 
 Print Ctypes.program.
+Locate positive.
 Locate Genv.t.
 
 (* Require Import FSets. *)
@@ -39,9 +40,6 @@ Definition str_map_globals := StrMap.t string.
 Definition str_map_composites := StrMap.t (option (string * Ctypes.composite_definition)).
 
 
-
-
-(* TODO *)
 (* - precedence *)
 (* - across the board handle attributes*)
 (* - module *)
@@ -171,7 +169,7 @@ Fixpoint check_ty (ty: Ctypes.type) : res (unit) :=
   | Ctypes.Tpointer _ a => check_attr a
   | Ctypes.Tarray _ _ a => check_attr a
   | Ctypes.Tfunction tl ty _ =>
-      do _ <- check_typelist tl;
+      do _unused <- check_typelist tl;
       check_ty ty
   | Ctypes.Tstruct _ a => check_attr a
   | Ctypes.Tunion _ a => check_attr a
@@ -180,7 +178,7 @@ with check_typelist(tl : typelist) : res (unit) :=
   match tl with
   | Ctypes.Tnil => OK(tt)
   | Ctypes.Tcons ty tl =>
-      do _ <- check_ty ty;
+      do _unused <- check_ty ty;
       check_typelist tl
   end.
 
@@ -674,57 +672,57 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   end.
 
 (* NOTE: CE is just types *)
-Fixpoint transl_syntax_expr (ce: composite_env) (a: Clight.expr) {struct a}
+Fixpoint transl_syntax_expr (a: Clight.expr) {struct a}
   : SimplExpr.mon (rexpr) :=
   match a with
   | Clight.Econst_int n ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret (Econst_int n ty)
   | Clight.Econst_float n ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret(Econst_float n ty)
   | Clight.Econst_single n ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret(Econst_single n ty)
   | Clight.Econst_long n ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret(Econst_long n ty)
   | Clight.Evar id ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret(Evar id ty)
   | Clight.Etempvar id ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret(Etempvar id ty)
   | Clight.Ederef b ty =>
-      gdom _ <- check_ty ty;
-      gdo tb <- transl_syntax_expr ce b;
+      gdom unused <- check_ty ty;
+      gdo tb <- transl_syntax_expr b;
       SimplExpr.ret(Ederef tb ty)
   | Clight.Eaddrof b ty =>
-      gdom _ <- check_ty ty;
-      gdo tb <- transl_syntax_expr ce b;
+      gdom unused <- check_ty ty;
+      gdo tb <- transl_syntax_expr b;
       SimplExpr.ret(Eaddrof tb ty)
   | Clight.Eunop op exp ty =>
-      gdom _ <- check_ty ty;
-      gdo translated_exp <- transl_syntax_expr ce exp;
+      gdom unused <- check_ty ty;
+      gdo translated_exp <- transl_syntax_expr exp;
       SimplExpr.ret(Eunop op translated_exp ty)
   | Clight.Ebinop op exp1 exp2 ty =>
-      gdom _ <- check_ty ty;
-      gdo rexp1 <- transl_syntax_expr ce exp1;
-      gdo rexp2 <- transl_syntax_expr ce exp2;
+      gdom unused <- check_ty ty;
+      gdo rexp1 <- transl_syntax_expr exp1;
+      gdo rexp2 <- transl_syntax_expr exp2;
       SimplExpr.ret(Ebinop op rexp1 rexp2 ty)
   | Clight.Ecast exp ty =>
-      gdom _ <- check_ty ty;
-      gdo rexp <- transl_syntax_expr ce exp;
+      gdom unused <- check_ty ty;
+      gdo rexp <- transl_syntax_expr exp;
       SimplExpr.ret(Ecast rexp ty)
   | Clight.Efield exp ident ty =>
-      gdom _ <- check_ty ty;
-      gdo rexp <- transl_syntax_expr ce exp;
+      gdom unused <- check_ty ty;
+      gdo rexp <- transl_syntax_expr exp;
       SimplExpr.ret(Efield rexp ident ty)
   | Clight.Esizeof ty' ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret(Esizeof ty' ty)
   | Clight.Ealignof ty' ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       SimplExpr.ret(Ealignof ty' ty)
   end.
 
@@ -828,7 +826,7 @@ Fixpoint insert_cast_expr (e: rexpr) : SimplExpr.mon (rexpr)
       end
 
   | Ebinop op exp1 exp2 ty =>
-      gdom _ <- check_ty ty;
+      gdom unused <- check_ty ty;
       gdo rexp1 <- insert_cast_expr exp1;
       gdo rexp2 <- insert_cast_expr exp2;
       gdo (c_rexp1, c_rexp2, rty) <-
@@ -872,15 +870,14 @@ Fixpoint insert_cast_expr (e: rexpr) : SimplExpr.mon (rexpr)
 Locate int.
 
 Fixpoint transl_syntax_arglist
-  (ce: composite_env)
   (al: list Clight.expr)
   {struct al}:
   SimplExpr.mon (list rexpr) :=
   match al with
   | nil => SimplExpr.ret(nil)
   | a1 :: a2 =>
-      gdo arg <- transl_syntax_expr ce a1 ;
-      gdo args <- transl_syntax_arglist ce a2 ;
+      gdo arg <- transl_syntax_expr a1 ;
+      gdo args <- transl_syntax_arglist a2 ;
       SimplExpr.ret(arg :: args)
   end.
 
@@ -900,7 +897,6 @@ Fixpoint insert_cast_arglist
 Print typelist.
 
 Fixpoint transl_syntax_arglist_with_ty_info
-  (ce: composite_env)
   (al: list Clight.expr)
   (tyl: typelist)
   {struct al}:
@@ -911,16 +907,16 @@ Fixpoint transl_syntax_arglist_with_ty_info
       match tyl with
       | Tnil =>
         (
-          gdo arg <- transl_syntax_expr ce a1 ;
-          gdo args <- transl_syntax_arglist_with_ty_info ce a2 Tnil ;
+          gdo arg <- transl_syntax_expr a1 ;
+          gdo args <- transl_syntax_arglist_with_ty_info a2 Tnil ;
           SimplExpr.ret(arg :: args)
         )
       | Tcons ty tyl' =>
       (
-          gdo arg <- transl_syntax_expr ce a1 ;
+          gdo arg <- transl_syntax_expr a1 ;
           (* TODO laso don't need this *)
           (* gdo casted_arg <- i2etc (r_typeof arg) ty arg ; *)
-          gdo args <- transl_syntax_arglist_with_ty_info ce a2 tyl';
+          gdo args <- transl_syntax_arglist_with_ty_info a2 tyl';
           SimplExpr.ret(arg :: args)
       )
       end
@@ -987,17 +983,17 @@ Fixpoint transl_syntax_statement
     | Clight.Sskip => SimplExpr.ret (S_skip)
     | Clight.Sassign lval rval =>
         (* gdo r_val <- *)
-          gdo r_lval <- transl_syntax_expr ce lval;
-          gdo r_rval <- transl_syntax_expr ce rval;
+          gdo r_lval <- transl_syntax_expr lval;
+          gdo r_rval <- transl_syntax_expr rval;
           let gen_res := fun (e: rexpr) => S_assign r_lval e in
           process_expr r_rval gen_res
         (* SimplExpr.ret r_val *)
     | Clight.Sset x exp =>
-        gdo r_exp <- transl_syntax_expr ce exp;
+        gdo r_exp <- transl_syntax_expr exp;
         let gen_res := fun (e: rexpr) => S_set x e in
         process_expr r_exp gen_res
     | Clight.Sifthenelse exp s1 s2 =>
-        gdo cond <- transl_syntax_expr ce exp;
+        gdo cond <- transl_syntax_expr exp;
         gdo r_s1 <- transl_syntax_statement md s1;
         gdo r_s2 <- transl_syntax_statement md s2;
         let gen_res := fun (e: rexpr) => S_if_then_else e r_s1 r_s2 in
@@ -1009,7 +1005,7 @@ Fixpoint transl_syntax_statement
     | Clight.Sreturn None => SimplExpr.ret (S_return None)
     | Clight.Sreturn (Some exp) =>
         let exp_ty := Clight.typeof exp in
-        gdo r_exp <- transl_syntax_expr ce exp;
+        gdo r_exp <- transl_syntax_expr exp;
         let gen_res := fun (e: rexpr) => S_return (Some (e, exp_ty)) in
         process_expr r_exp gen_res
     (* TODO still need to handle casting and splitting expressions for this case *)
@@ -1024,7 +1020,7 @@ Fixpoint transl_syntax_statement
         end in
       let dflt_case_val := Econst_int dflt_is_first dflt_case_ty in (*initial val *)
       gdo dflt_case_ident <- SimplExpr.gensym dflt_case_ty ;
-      gdo r_exp <- transl_syntax_expr ce exp ;
+      gdo r_exp <- transl_syntax_expr exp ;
       gdo exp_ident <- SimplExpr.gensym exp_typ;
       let exp_decl := S_set exp_ident r_exp in
 
@@ -1069,16 +1065,16 @@ Fixpoint transl_syntax_statement
 
       SimplExpr.ret (S_sequence (S_sequence dflt_case_decl exp_decl) new_loop)
     | Clight.Scall x name al =>
-        gdo name' <- transl_syntax_expr ce name ;
+        gdo name' <- transl_syntax_expr name ;
         match r_typeof name' with
         | Tfunction tyl t cc =>
           (
-            gdo al' <- transl_syntax_arglist_with_ty_info ce al tyl;
+            gdo al' <- transl_syntax_arglist_with_ty_info al tyl;
             SimplExpr.ret (S_call x name' al')
           )
         | _ =>
           (
-            gdo al' <- transl_syntax_arglist ce al ;
+            gdo al' <- transl_syntax_arglist al ;
             SimplExpr.ret (S_call x name' al')
           )
         end
@@ -1507,7 +1503,8 @@ Fixpoint nat_to_string (n : nat) : string :=
 
 Print PositiveSet.
 
-Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_syms: list ident) : res r_function :=
+Definition transl_internal_fun (ce: composite_env) (f: Clight.function)
+  (glob_syms: list ident) : res r_function :=
   let return_type := (Clight.fn_return f) in
   let generator := reconstruct_generator f.(Clight.fn_temps) in
   let get_ty_of_var_rust :=
@@ -1591,7 +1588,8 @@ Definition transl_internal_fun (ce: composite_env) (f: Clight.function) (glob_sy
 (* Definition process_expr *)
 
 (* TODO forget external functions now. We don't care about them. *)
-Definition transl_fundef (ce: composite_env) (glob_syms: list ident) (id: ident) (fn : Clight.fundef) : res r_fundef :=
+Definition transl_fundef (ce: composite_env)
+  (glob_syms: list ident) (id: ident) (fn : Clight.fundef) : res r_fundef :=
   match fn with
     | Ctypes.Internal f =>
         do r_f <- transl_internal_fun ce f glob_syms;
@@ -1626,6 +1624,7 @@ Print Ctypes.program.
   - pass in function on the end
 *)
 
+Locate res.
 Definition gen_new_main'
   (old_main: globdef (Ctypes.fundef Clight.function) type)
   (old_main_ident: ident)
