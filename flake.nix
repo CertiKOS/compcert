@@ -36,6 +36,7 @@
         # packages.compcerto = pkgs.coqPackages_8_12.compcerto;
         packages.devshell = self.devShell.${system};
         devShell = pkgs.mkShell.override { } {
+          OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
           RUST_SRC_PATH = "${fenixStable}/lib/rustlib/src/rust/library";
           RUST_LIB_SRC = "${fenixStable}/lib/rustlib/src/rust/library";
@@ -77,7 +78,11 @@
             # coqPackages_8_19.coq.ocamlPackages.utop
             coqPackages_8_19.coq.ocamlPackages.ocp-indent
             coqPackages_8_19.coq.ocamlPackages.ocaml-lsp
+            coqPackages_8_19.coq.ocamlPackages.dot-merlin-reader
+            coqPackages_8_19.coq.ocamlPackages.ocamlformat
+            coqPackages_8_19.coq.ocamlPackages.ocamlgraph
             coqPackages_8_19.coq-lsp
+
             # ocaml-ng.ocamlPackages_4_10.ocaml-lsp
             # coqPackages_8_19.coq.ocamlPackages.ocamlformat
 

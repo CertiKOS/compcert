@@ -33,6 +33,7 @@ Require Csyntax.
 Require Ctyping.
 Require Clight.
 Require RustLight.
+Require ClightCFG.
 Require Compiler.
 Require Parser.
 Require Initializers.
@@ -91,6 +92,10 @@ Extract Constant Allocation.regalloc => "Regalloc.regalloc".
 (* Linearize *)
 Extract Constant Linearize.enumerate_aux => "Linearizeaux.enumerate_aux".
 
+(* ClightCFG *)
+Extract Constant ClightCFG.first_unused_bb_uid => "Camlcoq.first_unused_bb_uid".
+Extraction Inline ClightCFG.ret ClightCFG.error ClightCFG.bind ClightCFG.bind2 ClightCFG.bind3.
+
 (* SimplExpr *)
 Extract Constant SimplExpr.first_unused_ident => "Camlcoq.first_unused_ident".
 Extraction Inline SimplExpr.ret SimplExpr.error SimplExpr.bind SimplExpr.bind2.
@@ -120,6 +125,7 @@ Extract Constant Compopts.debug =>
 (* Compiler *)
 Extract Constant Compiler.print_Clight => "PrintClight.print_if".
 Extract Constant Compiler.print_Rustlight => "PrintRustLight.print_if".
+Extract Constant Compiler.print_clightcfg_in_ml => "PrintClightCFG.print_if".
 Extract Constant Compiler.extract_Symbols => "PrintClight.extract_symbols".
 Extract Constant Compiler.print_Cminor => "PrintCminor.print_if".
 Extract Constant Compiler.print_RTL => "PrintRTL.print_if".
@@ -157,9 +163,10 @@ Cd "extraction".
 Separate Extraction
    Compiler.transf_c_program Compiler.transf_cminor_program
    Compiler.print_r_program
+   Compiler.print_clightcfg
    Compiler.get_exports
    Cexec.do_initial_state Cexec.do_step Cexec.at_final_state
-   Ctypes.merge_attributes Ctypes.remove_attributes 
+   Ctypes.merge_attributes Ctypes.remove_attributes
    Ctypes.build_composite_env Ctypes.layout_struct
    Initializers.transl_init Initializers.constval
    Csyntax.Eindex Csyntax.Epreincr Csyntax.Eselection
@@ -181,4 +188,6 @@ Separate Extraction
    Floats.Float32.from_parsed Floats.Float.from_parsed
    Globalenvs.Senv.invert_symbol
    Parser.translation_unit_file
-   RustLight.rexpr RustLight.r_program RustLight.StrMap RustLight.str_map_globals RustLight.str_map_composites.
+   RustLight.rexpr RustLight.r_program RustLight.StrMap RustLight.str_map_globals RustLight.str_map_composites
+   ClightCFG.ClightCFG
+   ClightCFG.BasicBlock ClightCFG.BBEdge ClightCFG.Instruction ClightCFG.BBMap.

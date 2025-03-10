@@ -19,13 +19,49 @@ open Driveraux
 open Frontend
 open Assembler
 open Linker
+(* open Graph *)
+(* open Camlcoq *)
+
+(* module Vertex = struct *)
+(*   type t = Camlcoq.P.t *)
+(*   let compare = Stdlib.compare *)
+(*   let hash = Hashtbl.hash *)
+(*   let equal = (=) *)
+(* end *)
+(* module Edge = struct *)
+(*   type t = Vertex.t * Vertex.t *)
+(*   let compare = Stdlib.compare *)
+(*   let hash = Hashtbl.hash *)
+(*   let default = (Camlcoq.P.Coq_xH, Camlcoq.P.Coq_xH) *)
+(* end *)
+(**)
+(* module CFG = struct *)
+(*   include Graph.Imperative.Digraph.ConcreteLabeled(Vertex)(Edge) *)
+(*   let empty () : t = create () (* returns a new empty graph *) *)
+(*   let add_edge g v1 v2 : t = (* wrap add_edge to return the graph *) *)
+(*     (add_edge g v1 v2; g) *)
+(* end *)
+(**)
+(* module DomTree = Graph.Dominator.Make_graph(CFG) *)
+(**)
+(* (* returns (vertex -> list children of vertex) *) *)
+(* let get_dom_tree_for_coq (cfg: CFG.t) (entry_node: Vertex.t) *)
+(* : (Vertex.t * Vertex.t list) list *)
+(*   = *)
+(*     let dom_info = DomTree.compute_all cfg entry_node in *)
+(*     let [@warning "-42"] [@warning "-40"] dom_tree_graph = dom_info.dom_graph () in *)
+(*     CFG.fold_vertex (fun v acc -> *)
+(*       let children = CFG.succ dom_tree_graph v in *)
+(*       (v, children) :: acc *)
+(*       ) dom_tree_graph [] *)
+
 open Diagnostics
 open RustLight
 
 (* Name used for version string etc. *)
 let tool_name = "C verified compiler"
 
-(* (\* struct or union ident -> (file, defn) option  *\) *)
+(* struct or union ident -> (file, defn) option *)
 let sym_mapping : (str_map_globals) ref = ref (StrMap.empty)
 
 (* struct or union ident -> (file, defn) option  *)

@@ -20,6 +20,7 @@ Require Import AST Linking Smallstep.
 Require Ctypes Csyntax Csem Cstrategy Cexec.
 Require Clight.
 Require RustLight.
+Require ClightCFG.
 Require Csharpminor.
 Require Cminor.
 Require CminorSel.
@@ -81,6 +82,8 @@ Parameter print_Rustlight:
   RustLight.str_map_globals
   -> RustLight.str_map_composites
   -> string -> RustLight.r_program -> unit.
+Parameter print_clightcfg_in_ml:
+  ClightCFG.clightcfg_program -> unit.
 Parameter extract_Symbols: Clight.program -> (list string * list (string * Ctypes.composite_definition)).
 Parameter print_Cminor: Cminor.program -> unit.
 Parameter print_RTL: Z -> RTL.program -> unit.
@@ -184,7 +187,35 @@ Definition get_exports (p: Csyntax.program) :
   @@@ SimplExpr.transl_program
   @@@ (fun (p': Clight.program) => OK(extract_Symbols p')).
 
-Definition identity_rprog (p: RustLight.r_program) : res RustLight.r_program := OK(p).
+(* TODO why does errors.mon not have this ?? *)
+Definition ret {A} (p: A) : res A := OK(p).
+
+Definition print_clightcfg
+  (p: Csyntax.program) : res ClightCFG.clightcfg_program :=
+  OK p
+  @@@ SimplExpr.transl_program
+  @@@ ClightCFG.transl_program
+  @@ print (print_clightcfg_in_ml)
+  @@@ ret.
+
+Notation "'TODO'" := (ltac:(fail "TODO: implement this")) (at level 0).
+
+Fail Definition print_r_program'
+  (sym_mapping: RustLight.str_map_globals)
+  (composite_mapping: RustLight.str_map_composites)
+  (name: string)
+  (p: ClightCFG.clightcfg_program)
+  : res RustLight.r_program
+  :=
+  TODO.
+
+  (*OK p*)
+  (*@@@ SimplExpr.transl_program*)
+  (*@@@ RustLight.transl_program*)
+  (*@@ print (print_Rustlight sym_mapping composite_mapping name)*)
+  (*(* TODO is there a less ugly way to do this sequencing *)*)
+  (*@@@ identity_rprog.*)
+
 
 Definition print_r_program
   (sym_mapping: RustLight.str_map_globals)
@@ -197,15 +228,12 @@ Definition print_r_program
   @@@ RustLight.transl_program
   @@ print (print_Rustlight sym_mapping composite_mapping name)
   (* TODO is there a less ugly way to do this sequencing *)
-  @@@ identity_rprog.
+  @@@ ret.
 
 
 Definition transf_c_program (p: Csyntax.program) : res Asm.program :=
   OK p
   @@@ time "Clight generation" SimplExpr.transl_program
-  (* @@@ RustLight.transl_program *)
-  (* @@ print print_Rustlight *)
-  (* @@@ drop_rustlight *)
   @@@ transf_clight_program.
 
 (** Force [Initializers] and [Cexec] to be extracted as well. *)

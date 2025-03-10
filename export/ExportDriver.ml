@@ -118,7 +118,7 @@ let tool_name = "CompCert AST generator"
 
 (* Specific options *)
 
-type export_mode = Mode_Csyntax | Mode_Clight | Mode_Rustlight
+type export_mode = Mode_Csyntax | Mode_Clight | Mode_Rustlight | Mode_ClightCFG
 let option_mode = ref Mode_Rustlight
 let option_normalize = ref false
 
@@ -177,6 +177,18 @@ let compile_c_file sourcename ifile ofile =
   match !option_mode with
   | Mode_Csyntax -> export_csyntax sourcename cs ofile
   | Mode_Clight  -> export_clight sourcename cs ofile
+  | Mode_ClightCFG -> (
+    match
+      (Compiler.print_clightcfg cs) with
+    | Errors.OK clight_cfg_prog -> (
+      let oc = open_out ofile in
+      ExportClightCFG.print_program
+        (Format.formatter_of_out_channel oc)
+        clight_cfg_prog
+        ifile
+      )
+    | Errors.Error msg -> printf "error! %s" (C2C.string_of_errmsg msg)
+  )
   | Mode_Rustlight -> (
       match
         (Compiler.print_r_program !sym_mapping !composite_mapping
@@ -277,6 +289,8 @@ let cmdline_actions =
  [
   Exact "-csyntax", Unit (fun () -> option_mode := Mode_Csyntax);
   Exact "-clight", Unit (fun () -> option_mode := Mode_Clight);
+  Exact "-rustlight", Unit (fun () -> option_mode := Mode_Rustlight);
+  Exact "-clightcfg", Unit (fun () -> option_mode := Mode_ClightCFG);
   Exact "-E", Set option_E;
   Exact "-normalize", Set option_normalize;
   Exact "-canonical-idents", Set Camlcoq.use_canonical_atoms;

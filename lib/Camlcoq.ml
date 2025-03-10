@@ -374,6 +374,11 @@ let first_unused_ident () =
   then P.of_int 128
   else !next_atom
 
+let first_unused_bb_uid () =
+  if !use_canonical_atoms
+  then P.of_int 128
+  else !next_atom
+
 (* Strings *)
 
 let camlstring_of_coqstring (s: char list) =

@@ -65,7 +65,7 @@ WARN_ERRORS=
 endif
 
 COMPFLAGS+=-g -strict-sequence -safe-string \
-  $(INCLUDES) -I "$(MENHIR_DIR)" -I +str -I +unix \
+  $(INCLUDES) -I "$(MENHIR_DIR)" -I "${OCAMLGRAPHPATH}" -I +str -I +unix \
   $(WARNINGS) $(WARN_ERRORS)
 
 # Using .opt compilers if available
@@ -88,7 +88,7 @@ PARSERS=cparser/pre_parser.mly
 LEXERS=cparser/Lexer.mll lib/Tokenize.mll \
 	     lib/Readconfig.mll lib/Responsefile.mll
 
-LIBS=str.cmxa unix.cmxa $(MENHIR_LIBS)
+LIBS=str.cmxa unix.cmxa graph.cmxa $(MENHIR_LIBS)
 LIBS_BYTE=$(patsubst %.cmxa,%.cma,$(patsubst %.cmx,%.cmo,$(LIBS)))
 
 EXECUTABLES=ccomp ccomp.byte cchecklink cchecklink.byte clightgen clightgen.byte
@@ -143,7 +143,7 @@ endif
 	@echo "OCAMLC   $<"
 	@$(OCAMLC) -c $<
 %.cmx: %.ml
-	@echo "OCAMLOPT $<"
+	@echo "OCAMLOPT $< "
 	@$(OCAMLOPT) -c $<
 
 %.ml: %.mll
