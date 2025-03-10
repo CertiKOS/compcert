@@ -16,7 +16,7 @@ Open Scope gensym_monad_scope.
 Inductive DominatorSet : Type
   :=
   | entry_node: bb_uid -> DominatorSet
-  (* immediate domiantor *)
+  (* immediate dominator *)
   (* immediate dominator -> nodes domianting the immediate dominator
      -> dominator set *)
   | immediate_dominator: bb_uid -> DominatorSet -> DominatorSet.

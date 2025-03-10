@@ -4,6 +4,8 @@ Require Import Ctypes.
 Require Clight.
 Require Import AST.
 
+Notation "'TODO'" := (ltac:(fail "TODO: implement this")) (at level 0).
+
 (* Open Scope list_scope. *)
 Import List.ListNotations.
 Print list.
@@ -119,8 +121,11 @@ Record function : Type := mkfunction {
   fn_params: list (ident * type);
   fn_vars: list (ident * type);
   fn_temps: list (ident * type);
-  fn_body: ClightCFG;
+  fn_body: (ClightCFG * list (bb_uid * bb_uid));
 }.
+
+Definition clightcfg_program := Ctypes.program function.
+Definition clightcfg_fundef := Ctypes.fundef function.
 
 Record bb_generator : Type := mkgenerator {
   next_bb_uid: bb_uid;
@@ -314,7 +319,7 @@ Definition bb_is_empty
   do target_bb <-
   (match BBMap.find target_bb_uid (map cfg) with
   | Some ele => ret ele
-  | None => error(Errors.msg "BB missing from node")
+  | None => error(Errors.msg "BB missing from node UID in ClightCFG")
   end);
   match target_bb with
   | bb insts edge => (
@@ -392,34 +397,33 @@ Fixpoint process_statement_to_cfg
    *)
   (unfinished_goto_nodes: list (Clight.label * bb_uid))
   {struct c_stmt}
-  (* TODO this needs to change to include unfinished_goto_nodes *)
-  : mon (ClightCFG * list bb_uid * (list (Clight.label * bb_uid)))
+  : mon (ClightCFG * option bb_uid * (list (Clight.label * bb_uid)))
 :=
   match c_stmt with
   | Clight.Sbuiltin x ef tyargs bl =>
       let new_inst := i_builtin x ef tyargs bl in
       do updated_cfg <- add_inst_to_bb cfg cur_bb_uid new_inst;
-      ret (updated_cfg, [cur_bb_uid], unfinished_goto_nodes)
+      ret (updated_cfg, Some cur_bb_uid, unfinished_goto_nodes)
   | Clight.Scall x name al =>
       let new_inst := i_call x name al in
       do updated_cfg <- add_inst_to_bb cfg cur_bb_uid new_inst;
-      ret (updated_cfg, [cur_bb_uid], unfinished_goto_nodes)
+      ret (updated_cfg, Some cur_bb_uid, unfinished_goto_nodes)
   | Clight.Sskip =>
       let new_inst := i_skip in
       do updated_cfg <- add_inst_to_bb cfg cur_bb_uid new_inst;
-      ret (updated_cfg, [cur_bb_uid], unfinished_goto_nodes)
+      ret (updated_cfg, Some cur_bb_uid, unfinished_goto_nodes)
   | Clight.Sassign lval rval =>
       let new_inst := i_assign lval rval in
       do updated_cfg <- add_inst_to_bb cfg cur_bb_uid new_inst;
-      ret (updated_cfg, [cur_bb_uid], unfinished_goto_nodes)
+      ret (updated_cfg, Some cur_bb_uid, unfinished_goto_nodes)
   | Clight.Sset x exp =>
       let new_inst := i_set x exp in
       do updated_cfg <- add_inst_to_bb cfg cur_bb_uid new_inst;
-      ret (updated_cfg, [cur_bb_uid], unfinished_goto_nodes)
+      ret (updated_cfg, Some cur_bb_uid, unfinished_goto_nodes)
   | Clight.Sreturn maybe_expr =>
       let new_edge := terminate maybe_expr in
       do updated_cfg <- set_edge_in_bb cfg cur_bb_uid new_edge;
-      ret (updated_cfg, nil, unfinished_goto_nodes)
+      ret (updated_cfg, None, unfinished_goto_nodes)
   | Clight.Sifthenelse exp s1 s2 =>
       (* create two branch bbs*)
       do (b1_uid, cfg1) <- create_new_bb cfg;
@@ -437,7 +441,13 @@ Fixpoint process_statement_to_cfg
          <- process_statement_to_cfg cfg4 b2_uid s2 maybe_break_uid maybe_break_uid
                                     ugn1;
 
-      let all_unfinished_edges := b1_unfinished_edges ++ b2_unfinished_edges in
+      let all_unfinished_edges :=
+        match b1_unfinished_edges, b2_unfinished_edges with
+        | None, None => nil
+        | Some x, None => [x]
+        | None, Some y => [y]
+        | Some x, Some y => [x ; y]
+        end in
 
       (* note: could just compare to nil *)
       if Nat.ltb 0 (List.length all_unfinished_edges) then
@@ -446,26 +456,28 @@ Fixpoint process_statement_to_cfg
 
         let finishing_edge := direct b_join in
         do cfg7 <- apply_edge_to_all_bbs cfg6 finishing_edge all_unfinished_edges;
-        ret (cfg7, [b_join], ugn2)
+        ret (cfg7, Some b_join, ugn2)
       else
-        ret (cfg5, nil, ugn2)
+        ret (cfg5, None, ugn2)
   | Clight.Sloop ns1 ns2 => (
-    (* TODO there is optimization needed here; should NOT always create a new basic block. *)
-    (* do can_use_cur_bb <- bb_is_empty cfg cur_bb_uid; *)
+    (* TODO there is optimization needed here; should NOT always create a new basic block.We can reuse if the previous bb is empty. *)
 
-    (* if can_use_cur_bb then *)
-
-    (* else ( *)
-      (* create the loop header bb *)
-      do (bb_ns1, cfg1) <- create_new_bb cfg;
-
-      let cur_bb_edge := direct bb_ns1 in
-
-      (* close up the curent bb *)
-      do cfg2 <- set_edge_in_bb cfg1 cur_bb_uid cur_bb_edge;
+      do (bb_ns1, cfg1) <-
+        (
+         do dont_need_new_bb_uid <- bb_is_empty cfg cur_bb_uid;
+        match dont_need_new_bb_uid with
+        | false =>
+          do (loop_header_uid, cfg1) <- create_new_bb cfg;
+          let finished_edge := direct loop_header_uid in
+          do cfg2 <- set_edge_in_bb cfg1 cur_bb_uid finished_edge;
+          ret (loop_header_uid, cfg2)
+        | true =>
+          ret (cur_bb_uid, cfg)
+        end
+      );
 
       (* create the exit bb *)
-      do (bb_exit, cfg3) <- create_new_bb cfg2;
+      do (bb_exit, cfg3) <- create_new_bb cfg1;
 
       (* create the s2 bb *)
       do (bb_ns2, cfg4) <- create_new_bb cfg3;
@@ -474,10 +486,16 @@ Fixpoint process_statement_to_cfg
          <- process_statement_to_cfg cfg3 bb_ns1 ns1 (Some bb_ns2) (Some bb_exit)
                                     unfinished_goto_nodes;
 
+      let unfinished_bbs_ns1_list :=
+        match unfinished_bbs_ns1 with
+        | None => []
+        | Some x => [x]
+        end in
+
       (* ns1 -> ns2 *)
       let s1_edge := direct bb_ns2 in
 
-      do cfg6 <- apply_edge_to_all_bbs cfg5 s1_edge unfinished_bbs_ns1;
+      do cfg6 <- apply_edge_to_all_bbs cfg5 s1_edge unfinished_bbs_ns1_list;
 
 
       do (cfg7, unfinished_bbs_ns2, ugn2)
@@ -486,10 +504,17 @@ Fixpoint process_statement_to_cfg
 
       let s2_edge := direct bb_ns1 in
 
-      do cfg8 <- apply_edge_to_all_bbs cfg7 s2_edge unfinished_bbs_ns2;
+      let unfinished_bbs_ns2_list :=
+        match unfinished_bbs_ns2 with
+        | None => []
+        | Some x => [x]
+        end in
+
+
+      do cfg8 <- apply_edge_to_all_bbs cfg7 s2_edge unfinished_bbs_ns2_list;
 
       (* exit is the "next bb" so to speak*)
-      ret (cfg8, [bb_exit], ugn2)
+      ret (cfg8, Some bb_exit, ugn2)
     (* ) *)
   )
   | Clight.Sbreak =>
@@ -497,7 +522,7 @@ Fixpoint process_statement_to_cfg
       | Some break_uid => (
         let break_edge := direct break_uid in
         do cfg1 <- set_edge_in_bb cfg cur_bb_uid break_edge;
-        ret (cfg1, nil, unfinished_goto_nodes)
+        ret (cfg1, None, unfinished_goto_nodes)
       )
       | None => error(Errors.msg "Break missing target")
       end
@@ -507,7 +532,7 @@ Fixpoint process_statement_to_cfg
       | Some continue_uid => (
         let continue_edge := direct continue_uid in
         do cfg1 <- set_edge_in_bb cfg cur_bb_uid continue_edge;
-        ret (cfg1, nil, unfinished_goto_nodes)
+        ret (cfg1, None, unfinished_goto_nodes)
       )
       | None => error(Errors.msg "Break missing target")
       end
@@ -539,21 +564,21 @@ Fixpoint process_statement_to_cfg
 
       do cfg4 <- set_edge_in_bb cfg3 cur_bb_uid new_edge;
 
-      ret (cfg4, [next_bb], ugn1)
+      ret (cfg4, Some next_bb, ugn1)
 
   | Clight.Ssequence s1 s2 =>
       do (cfg2, unfinished_nodes, ugn1)
          <- process_statement_to_cfg cfg cur_bb_uid s1
                                     maybe_continue_uid maybe_break_uid unfinished_goto_nodes;
       match unfinished_nodes with
-      | nil => (
+      | None => (
         (* if this is empty, that's ok. We probably returned. But, still need a new node. *)
         do (new_bb, cfg3) <- create_new_bb cfg2;
         (* note: we are *not* making a new bb here. If the control flow ends here, that's okay. *)
         process_statement_to_cfg cfg3 new_bb s2 maybe_continue_uid maybe_break_uid
                                  ugn1
       )
-      | unfinished_bb_uid :: nil => (
+      | Some unfinished_bb_uid => (
         do (new_bb, cfg3) <- create_new_bb cfg2;
 
         let end_edge := direct new_bb in
@@ -563,25 +588,25 @@ Fixpoint process_statement_to_cfg
         process_statement_to_cfg cfg3 new_bb s2 maybe_continue_uid maybe_break_uid
                                  ugn1
       )
-      | _ => error (Errors.msg "multiple unfinished nodes (impossible)" )
+      (*| _ => error (Errors.msg "multiple unfinished nodes (impossible)" )*)
       end
   | Clight.Sgoto lbl =>
     (* The basic block ends. We add to the unfinished nodes and fix it up later *)
     let ugn1 := (lbl, cur_bb_uid) :: unfinished_goto_nodes in
-    ret (cfg, nil, ugn1)
+    ret (cfg, None, ugn1)
   | Clight.Slabel lbl s => (
     (* check if we need to make a new uid *)
     (* if we do, make it*)
     do dont_need_new_bb_uid <- bb_is_empty cfg cur_bb_uid;
     do (cfg1, lbl_uid) <-
     match dont_need_new_bb_uid with
-    | true => (
+    | true =>
+        ret (cfg, cur_bb_uid)
+    | false =>
       do (goto_bb_uid, cfg1) <- create_new_bb cfg;
       let finished_edge := direct goto_bb_uid in
       do cfg2 <- set_edge_in_bb cfg1 cur_bb_uid finished_edge;
       ret (cfg2, goto_bb_uid)
-    )
-    | false => ret (cfg, cur_bb_uid)
     end;
 
     (* insert label into label map. If I did this more than once I would
@@ -629,12 +654,12 @@ with handle_switch_aux
                                     unfinished_goto_nodes;
       let sl := SLcons v case_uid (SLnil end_uid) in
       match maybe_unfinished_bb with
-      | [unfinished_bb] => (
+      | Some unfinished_bb => (
         let ending_edge := direct end_uid in
         do cfg2 <- set_edge_in_bb cfg1 unfinished_bb ending_edge;
         ret (sl, cfg2, ugn1)
       )
-      | _ => ret (sl, cfg1, ugn1)
+      | None => ret (sl, cfg1, ugn1)
       end
     )
     | _ => error (Errors.msg "missing uid (not possible)" )
@@ -654,7 +679,7 @@ with handle_switch_aux
 
       let sl' := SLcons v case_uid sl in
       match maybe_unfinished_bb with
-      | [unfinished_bb] => (
+      | Some unfinished_bb => (
         let ending_edge := direct case_uid_next in
         do cfg3 <- set_edge_in_bb cfg2 unfinished_bb ending_edge;
         ret (sl', cfg3, ugn2)
@@ -707,16 +732,15 @@ Definition transl_statement_to_cfg (c_stmt: Clight.statement) : mon ClightCFG :=
       lbl_map := LBLMap.empty bb_uid;
     |} in
 
-  do (cfg, unfinished_nodes, unfinished_goto_nodes)
+  do (cfg, maybe_unfinished_node, unfinished_goto_nodes)
      <- process_statement_to_cfg initial_cfg entry_node_uid c_stmt None None nil;
 
   (* finish up last edge *)
   do cfg1 <-
-    match unfinished_nodes with
-    | nil => ret cfg
-    | unfinished_node_uid :: nil =>
+    match maybe_unfinished_node with
+    | None => ret cfg
+    | Some unfinished_node_uid =>
         set_edge_in_bb cfg unfinished_node_uid (terminate None)
-    | _ => error(Errors.msg "BB missing from cfg")
     end;
 
   finish_lbled_nodes cfg1 unfinished_goto_nodes.
@@ -725,7 +749,7 @@ Definition transl_statement_to_cfg (c_stmt: Clight.statement) : mon ClightCFG :=
 Print Clight.function.
 Print Errors.Error.
 
-Definition transl_function_to_cfg (c_fn: Clight.function) : Errors.res function :=
+Definition transl_internal_function_to_cfg (c_fn: Clight.function) : Errors.res function :=
   let state := (initial_bb_generator tt) in
   match transl_statement_to_cfg c_fn.(Clight.fn_body) state with
     | OK cfg gen proof  => Errors.OK(
@@ -735,11 +759,37 @@ Definition transl_function_to_cfg (c_fn: Clight.function) : Errors.res function 
         fn_params := c_fn.(Clight.fn_params);
         fn_vars := c_fn.(Clight.fn_vars);
         fn_temps := c_fn.(Clight.fn_temps);
-        fn_body := cfg;
+        fn_body := (cfg, nil);
       |})
     | ERR(msg) => Errors.Error(msg)
   end.
+Close Scope cfg_monad_scope.
 
+Require Import Errors.
+Local Open Scope error_monad_scope.
 
+Definition transl_fundef
+  (_: ident)
+  (fn : Clight.fundef) : Errors.res clightcfg_fundef :=
+  match fn with
+    | Ctypes.Internal f =>
+      do r_f <- transl_internal_function_to_cfg f;
+        OK(Ctypes.Internal r_f)
+    | Ctypes.External a b c d => OK(Ctypes.External a b c d)
+  end.
 
-(* Definition transl_prog_to_cfg () *)
+Definition transl_globvar (id: ident) (ty: type) := OK ty.
+
+Definition transl_program (c_prog: Clight.program) : Errors.res clightcfg_program :=
+  do translated_fns <- AST.transf_globdefs
+        (transl_fundef)
+        transl_globvar
+        c_prog.(prog_defs);
+  OK {|
+    Ctypes.prog_defs := translated_fns;
+    Ctypes.prog_public := c_prog.(prog_public);
+    Ctypes.prog_main := c_prog.(prog_main);
+    Ctypes.prog_types := c_prog.(prog_types);
+    Ctypes.prog_comp_env := c_prog.(prog_comp_env);
+    Ctypes.prog_comp_env_eq := c_prog.(prog_comp_env_eq);
+  |}.
