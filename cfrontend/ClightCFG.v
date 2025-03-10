@@ -207,7 +207,7 @@ Definition add_inst_to_bb (cfg: ClightCFG) (target_bb_uid: bb_uid) (inst: Instru
   do target_bb <-
   (match BBMap.find target_bb_uid (map cfg) with
   | Some ele => ret ele
-  | None => error(Errors.msg "BB missing from node")
+  | None => error(Errors.msg "BB missing from node when setting inst in bb")
   end);
 
   (* match on node to get instructions *)
@@ -238,7 +238,7 @@ Definition set_edge_in_bb (cfg: ClightCFG) (target_bb_uid: bb_uid) (edge: BBEdge
   | Some ele =>
       let new_map := BBMap.remove target_bb_uid cfg.(map) in
       ret (ele, new_map)
-  | None => error(Errors.msg "BB missing from node")
+  | None => error(Errors.msg "BB missing from node when setting edge")
   end);
 
   (* match on node to get instructions *)
@@ -321,7 +321,7 @@ Fixpoint create_new_bbs_for_switch
   : mon (list bb_uid * ClightCFG) :=
   match lstmts with
   | Clight.LSnil => ret (nil, cfg)
-  | Clight.LScons v stmt lstmts' => (
+  | Clight.LScons _lbl _stmt lstmts' => (
     do (new_uid, cfg1) <- create_new_bb cfg;
     do (l, cfg2) <- create_new_bbs_for_switch cfg1 lstmts';
     ret (new_uid :: l, cfg2)
@@ -331,7 +331,7 @@ Fixpoint create_new_bbs_for_switch
 
 (* we have a bunch of bbs with `goto` statements that never *)
 (* got finished. So, we finish them up. *)
-Definition finish_lbled_nodes (cfg: ClightCFG)
+Fixpoint finish_lbled_nodes (cfg: ClightCFG)
   (* basicblock bb_uid should goto label lbl*)
   (unfinished_goto_nodes: list (Clight.label * bb_uid))
   : mon ClightCFG
@@ -339,13 +339,6 @@ Definition finish_lbled_nodes (cfg: ClightCFG)
   match unfinished_goto_nodes with
   | nil => ret cfg
   | (lbl, unfinished_node_uid) :: l' => (
-    (* get node from cfg *)
-    (* do unfinished_node <- *)
-    (*   match BBMap.find unfinished_node_uid (map cfg) with *)
-    (*   | Some unfinished_node => ret unfinished_node *)
-    (*   | None => error(Errors.msg "BB in unfinished goto node missing from cfg") *)
-    (*   end; *)
-
     (* get uid unfinished_node should go to from lbl map in cfg *)
 
     do target_uid <-
@@ -360,7 +353,7 @@ Definition finish_lbled_nodes (cfg: ClightCFG)
     (* insert node with fixed up edge into cfg *)
     do cfg1 <- set_edge_in_bb cfg unfinished_node_uid edge;
 
-    ret cfg
+    finish_lbled_nodes cfg1 l'
   )
   end.
 
@@ -599,12 +592,12 @@ Fixpoint process_statement_to_cfg
 
     (* insert label into label map. If I did this more than once I would
        separate out into auxilary function *)
-    let updated_lbl_map := LBLMap.add lbl lbl_uid (lbl_map cfg) in
+    let updated_lbl_map := LBLMap.add lbl lbl_uid (lbl_map cfg1) in
     let cfg2 := {|
       (* TODO nuke this field *)
-      node_set := cfg.(node_set);
-      entry := cfg.(entry);
-      map := cfg.(map);
+      node_set := cfg1.(node_set);
+      entry := cfg1.(entry);
+      map := cfg1.(map);
       lbl_map := updated_lbl_map;
     |} in
 
@@ -650,19 +643,19 @@ with handle_switch_aux
       | None => ret (sl, cfg1, ugn1)
       end
     )
-    | _ => error (Errors.msg "missing uid (not possible)" )
+    | nil => error (Errors.msg "ran out of uids (not possible)" )
     end
   )
 
   | Clight.LScons v stmt ((Clight.LScons v' stmt' stmts'') as the_rest) => (
     match l' with
-    | case_uid :: case_uid_next :: l'' => (
+    | case_uid :: ((case_uid_next :: l'') as the_rest') => (
       do (cfg1, maybe_unfinished_bb, ugn1) <-
            process_statement_to_cfg cfg case_uid stmt maybe_continue_uid maybe_break_uid
                                     unfinished_goto_nodes;
 
       do (sl, cfg2, ugn2) <-
-           handle_switch_aux cfg1 end_uid maybe_continue_uid maybe_break_uid the_rest l''
+           handle_switch_aux cfg1 end_uid maybe_continue_uid maybe_break_uid the_rest the_rest'
                              ugn1;
 
       let sl' := SLcons v case_uid sl in
@@ -675,7 +668,8 @@ with handle_switch_aux
       | _ => ret (sl', cfg2, ugn2)
       end
     )
-    | _ => error (Errors.msg "missing uid (not possible)" )
+    | a :: _b => error (Errors.msg "missing one uid" )
+    | nil => error (Errors.msg "missing 2 or more uids" )
     end
   )
   (* | nil => ( *)
