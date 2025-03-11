@@ -161,6 +161,7 @@ Set Extraction AccessOpaque.
 Cd "extraction".
 
 Separate Extraction
+   Compiler.print_r_program_from_cfg
    Compiler.transf_c_program Compiler.transf_cminor_program
    Compiler.print_r_program
    Compiler.print_clightcfg
@@ -190,4 +191,5 @@ Separate Extraction
    Parser.translation_unit_file
    RustLight.rexpr RustLight.r_program RustLight.StrMap RustLight.str_map_globals RustLight.str_map_composites
    ClightCFG.ClightCFG
-   ClightCFG.BasicBlock ClightCFG.BBEdge ClightCFG.Instruction ClightCFG.BBMap.
+   ClightCFG.BasicBlock ClightCFG.BBEdge ClightCFG.Instruction
+   ClightCFG.BBMap RustLightgen.transl_program.

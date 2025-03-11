@@ -1,4 +1,5 @@
 Require Import ClightCFG.
+Require Import AST.
 Require Import Ctypes.
 Require Import ZArith.
 Require Import RustLight.
@@ -211,11 +212,99 @@ Definition empty_context : TranslContext :=
     fallthrough := None;
   |}.
 
+(* -------------------- END haskell attempt. Will return to this later -----*)
 
-  (* prepend Fail to fixpoint then ltac:(fail "TODO").*)
-(* Fixpoint transl_clightcfg_to_rustlight
-  (cfg: ClightCFGWithMetadata)
-  : mon rstatement
-  := ret S_skip
-with doTree
-. *)
+Local Open Scope gensym_monad_scope_2.
+Local Open Scope error_monad_scope.
+
+Definition transl_cfg_to_rustlight_aux (
+  cfg: ClightCFG) (cur_node: bb_uid)
+  (* TODO more metadata will probably go here *)
+  : SimplExpr.mon rstatement :=
+  SimplExpr.error (msg "unimplemented").
+
+Definition transl_cfg_to_rustlight (cfg: ClightCFG) : SimplExpr.mon rstatement :=
+  transl_cfg_to_rustlight_aux cfg cfg.(entry).
+
+Definition gen_r_cc (cc: calling_convention) : res (r_calling_convention) :=
+  match cc.(AST.cc_vararg) with
+  | Some _n => Error(msg "Variadics are currently unsupported when converting to rust")
+  | None => OK(mkcallconv (AST.cc_structret cc))
+  end.
+
+Definition transl_internal_function_to_rustlight (c_fn: ClightCFG.function) (glob_syms: list ident) : Errors.res r_function :=
+  let generator := reconstruct_generator c_fn.(ClightCFG.fn_temps) in
+  match transl_cfg_to_rustlight (fst c_fn.(ClightCFG.fn_body)) generator with
+    | SimplExpr.Res r_body r_g i  =>
+      do rcc <- gen_r_cc c_fn.(ClightCFG.fn_callconv);
+
+      let tmp_vars := r_g.(SimplExpr.gen_trail) in
+      let in_scope_symbols := (map fst c_fn.(ClightCFG.fn_vars)) ++ (map fst c_fn.(ClightCFG.fn_params)) ++ (map fst tmp_vars) ++ glob_syms in
+
+      (* TODO this does NOT handle global symbols. I need to worry about those by (1) propagating their type and (2) including them here. .*)
+      (* name is not sufficient*)
+      let in_scope_symbols_tree :=
+        fold_left (fun
+          (acc : PositiveSet.t) (elt: ident) => PositiveSet.add elt acc)
+          in_scope_symbols (PositiveSet.empty) in
+
+      Errors.OK(
+      let cc := ClightCFG.fn_callconv c_fn in
+      {|
+        fn_return := c_fn.(ClightCFG.fn_return);
+        (* TODO this should be easy but need to make a function*)
+        fn_callconv := rcc;
+        fn_params := c_fn.(ClightCFG.fn_params);
+        fn_vars := c_fn.(ClightCFG.fn_vars);
+        fn_temps := c_fn.(ClightCFG.fn_temps);
+        fn_body := r_body;
+        fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
+        fn_is_safe := false;
+      |})
+    | SimplExpr.Err msg  => Errors.Error(msg)
+  end.
+
+Definition transl_fundef_r
+  (glob_syms: list ident)
+  (id: ident)
+  (fn : clightcfg_fundef) : Errors.res r_fundef :=
+  match fn with
+    | Ctypes.Internal f =>
+        do r_f <- transl_internal_function_to_rustlight f glob_syms;
+        OK(Ctypes.Internal r_f)
+    | Ctypes.External a b c d => OK(Ctypes.External a b c d)
+  end.
+
+Definition transl_globvar (id: ident) (ty: type) := OK ty.
+
+Definition get_glob_syms (cfg: clightcfg_program) : list ident :=
+  (* symbols that we know to be in scope already *)
+    map fst (filter (fun (prog_symbols: (_ * globdef (Ctypes.fundef ClightCFG.function) type)) =>
+       match (snd prog_symbols) with
+       | Gfun (Ctypes.Internal _) => true
+       | Gvar v => true
+       | _ => false
+       end)
+     cfg.(Ctypes.prog_defs)).
+
+Definition transl_program (cfg: clightcfg_program) : res (r_program)
+  :=
+  let global_symbols := get_glob_syms cfg in
+  do translated_fns <-
+    AST.transf_globdefs
+      (transl_fundef_r global_symbols)
+      transl_globvar
+      cfg.(prog_defs);
+
+  (* TODO the main renaming should be a separte function or separate pass or something *)
+  let r_prog : r_program :=
+    {|
+      (* PUBLIC only fns *)
+      Ctypes.prog_defs := translated_fns;
+      Ctypes.prog_public := cfg.(prog_public);
+      Ctypes.prog_main := cfg.(prog_main);
+      Ctypes.prog_types := cfg.(prog_types);
+      Ctypes.prog_comp_env := cfg.(prog_comp_env);
+      Ctypes.prog_comp_env_eq := cfg.(prog_comp_env_eq);
+    |} in
+  OK(r_prog).

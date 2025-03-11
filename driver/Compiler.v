@@ -20,6 +20,7 @@ Require Import AST Linking Smallstep.
 Require Ctypes Csyntax Csem Cstrategy Cexec.
 Require Clight.
 Require RustLight.
+Require RustLightgen.
 Require ClightCFG.
 Require Csharpminor.
 Require Cminor.
@@ -200,14 +201,23 @@ Definition print_clightcfg
 
 Notation "'TODO'" := (ltac:(fail "TODO: implement this")) (at level 0).
 
-Fail Definition print_r_program'
+Locate transl_program.
+
+Definition print_r_program_from_cfg
   (sym_mapping: RustLight.str_map_globals)
   (composite_mapping: RustLight.str_map_composites)
   (name: string)
-  (p: ClightCFG.clightcfg_program)
+  (p: Csyntax.program)
   : res RustLight.r_program
   :=
-  TODO.
+  OK p
+  @@@ SimplExpr.transl_program
+  @@@ ClightCFG.transl_program
+  @@@ RustLightgen.transl_program
+  @@ print (print_Rustlight sym_mapping composite_mapping name)
+  @@@ ret.
+
+
 
   (*OK p*)
   (*@@@ SimplExpr.transl_program*)
