@@ -267,6 +267,7 @@ Definition transl_cfg_to_rustlight_aux
   match block with
   | bb insts edge => (
       gdo transl_insts <- transl_clightcfg_instructions insts;
+      gdo transl_edge <-
       match edge with
       | direct nextbb =>
           let rs := gen_goto_next_bb cf_lbl_ident nextbb in
@@ -291,7 +292,8 @@ Definition transl_cfg_to_rustlight_aux
         gdo tr_exp <- transl_syntax_expr cexp;
         ret (S_match_int tr_exp lrstmts)
       | stub => SimplExpr.error(Errors.msg "stub edge encountered")
-      end
+      end;
+      ret (S_sequence transl_insts transl_edge)
   )
   end.
 
@@ -318,7 +320,8 @@ Definition transl_cfg_to_rustlight (cfg: ClightCFG) : SimplExpr.mon rstatement :
   (*transl_cfg_to_rustlight_aux cfg cfg.(entry) entry_uid.*)
   gdo r_list <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident (BBSet.elements nodes);
   let m_stmt := S_match_int (Etempvar cf_lbl_ident bbuid_ty) r_list in
-  let seq_stmt := S_sequence s_stmt m_stmt in
+  let l_stmt := S_loop None m_stmt S_skip in
+  let seq_stmt := S_sequence s_stmt l_stmt in
   ret seq_stmt.
 
 
@@ -352,7 +355,7 @@ Definition transl_internal_function_to_rustlight (c_fn: ClightCFG.function) (glo
         fn_callconv := rcc;
         fn_params := c_fn.(ClightCFG.fn_params);
         fn_vars := c_fn.(ClightCFG.fn_vars);
-        fn_temps := c_fn.(ClightCFG.fn_temps);
+        fn_temps := r_g.(SimplExpr.gen_trail);
         fn_body := r_body;
         fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
         fn_is_safe := false;
