@@ -1,4 +1,5 @@
 Require Import ClightCFG.
+Require Import Integers.
 Require Import AST.
 Require Import Ctypes.
 Require Import ZArith.
@@ -195,6 +196,18 @@ Definition transl_clightcfg_instruction (inst: Instruction)
       error(Errors.msg "INVALID BUILTIN")
   end.
 
+Fixpoint transl_clightcfg_instructions (insts: list Instruction) :
+  mon rstatement :=
+  match insts with
+  | i :: rest =>
+      (* TODO make tail recursive *)
+      (* by passing around fn to construction the function given a hole *)
+      do translated_inst <- transl_clightcfg_instruction i;
+      do translated_insts <- transl_clightcfg_instructions rest;
+      ret (S_sequence translated_inst translated_insts)
+  | nil => ret S_skip
+  end.
+
 Inductive ContainingSyntax :=
   | IfThenElse: ContainingSyntax
   | LoopHeadedBy: bb_uid -> ContainingSyntax
@@ -217,14 +230,97 @@ Definition empty_context : TranslContext :=
 Local Open Scope gensym_monad_scope_2.
 Local Open Scope error_monad_scope.
 
-Definition transl_cfg_to_rustlight_aux (
-  cfg: ClightCFG) (cur_node: bb_uid)
+Definition bbuid_ty : type := Ctypes.Tint I32 Unsigned noattr.
+
+Definition bb_to_rexpr (block_id: bb_uid): rexpr :=
+  Econst_int (Int.repr (Z.pos block_id)) bbuid_ty.
+
+Definition get_bb (cfg: ClightCFG) (block_uid: bb_uid): mon BasicBlock :=
+  match BBMap.find block_uid (cfg.(ClightCFG.map)) with
+  | Some block => ret block
+  | None => error(Errors.msg "BB missing from ndoe when viewing edge")
+  end.
+
+Definition gen_goto_next_bb
+  (cf_lbl_ident: bb_uid) (goto_id: bb_uid) : rstatement :=
+  let set_stmt := S_set cf_lbl_ident (bb_to_rexpr goto_id) in
+  (* NOTE probably unnecessary in most cases. I could remove it. *)
+  let continue_stmt := S_continue None in
+  S_sequence set_stmt continue_stmt.
+
+Fixpoint transl_cfg_to_rustlight_sl
+  (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (sl: switch_list)
+  : SimplExpr.mon labeled_rstatements :=
+  match sl with
+  | SLnil s' => ret (LSnil (gen_goto_next_bb cf_lbl_ident s'))
+  | SLcons maybe_int b sl' =>
+      gdo tr_sl' <- transl_cfg_to_rustlight_sl cfg cf_lbl_ident sl';
+      ret (LScons maybe_int (gen_goto_next_bb cf_lbl_ident b) tr_sl')
+  end.
+
+
+Definition transl_cfg_to_rustlight_aux
+  (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (cur_node: bb_uid)
   (* TODO more metadata will probably go here *)
   : SimplExpr.mon rstatement :=
-  SimplExpr.error (msg "unimplemented").
+  gdo block <- get_bb cfg cur_node;
+  match block with
+  | bb insts edge => (
+      gdo transl_insts <- transl_clightcfg_instructions insts;
+      match edge with
+      | direct nextbb =>
+          let rs := gen_goto_next_bb cf_lbl_ident nextbb in
+          ret rs
+      | conditional cexp b_true b_false =>
+          let r_b_true := gen_goto_next_bb cf_lbl_ident b_true in
+          let r_b_false := gen_goto_next_bb cf_lbl_ident b_false in
+          gdo r_cexp <- transl_syntax_expr cexp;
+          let rs := S_if_then_else r_cexp r_b_true r_b_false in
+          ret rs
+      | terminate maybe_exp =>
+          gdo tr_exp <-
+            match maybe_exp with
+            | Some exp =>
+                gdo e <- transl_syntax_expr exp;
+                ret (Some(e, r_typeof e))
+            | None => ret None
+            end;
+          ret (S_return tr_exp)
+      | switch cexp sl =>
+        gdo lrstmts <- transl_cfg_to_rustlight_sl cfg cf_lbl_ident sl;
+        gdo tr_exp <- transl_syntax_expr cexp;
+        ret (S_match_int tr_exp lrstmts)
+      | stub => SimplExpr.error(Errors.msg "stub edge encountered")
+      end
+  )
+  end.
+
+Fixpoint transl_cfg_nodes_to_rustlight (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (nodes : list bb_uid) : SimplExpr.mon labeled_rstatements :=
+  match nodes with
+  | n :: nodes' => (
+      gdo r_block <- transl_cfg_to_rustlight_aux cfg cf_lbl_ident n;
+      gdo rest <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident nodes';
+      ret (LScons (Some (Z.pos n)) r_block rest)
+  )
+  | nil =>
+      (* NOTE it would be nice to panic here, but I guess an infinite loop will do *)
+      (* shouldn't be possible to end up in an unknown block anyway *)
+      ret (LSnil S_skip)
+  end.
 
 Definition transl_cfg_to_rustlight (cfg: ClightCFG) : SimplExpr.mon rstatement :=
-  transl_cfg_to_rustlight_aux cfg cfg.(entry).
+  gdo cf_lbl_ident <- SimplExpr.gensym bbuid_ty;
+  let entry_uid := cfg.(entry) in
+  let s_stmt := S_set cf_lbl_ident (bb_to_rexpr entry_uid) in
+  let nodes := cfg.(ClightCFG.node_set) in
+  (* map transl_cfg_to_rustlight_aux over cfg nodes *)
+  (* each node becomes a switch *)
+  (*transl_cfg_to_rustlight_aux cfg cfg.(entry) entry_uid.*)
+  gdo r_list <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident (BBSet.elements nodes);
+  let m_stmt := S_match_int (Etempvar cf_lbl_ident bbuid_ty) r_list in
+  let seq_stmt := S_sequence s_stmt m_stmt in
+  ret seq_stmt.
+
 
 Definition gen_r_cc (cc: calling_convention) : res (r_calling_convention) :=
   match cc.(AST.cc_vararg) with
