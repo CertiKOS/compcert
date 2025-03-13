@@ -348,7 +348,6 @@ Definition transl_internal_function_to_rustlight (c_fn: ClightCFG.function) (glo
           in_scope_symbols (PositiveSet.empty) in
 
       Errors.OK(
-      let cc := ClightCFG.fn_callconv c_fn in
       {|
         fn_return := c_fn.(ClightCFG.fn_return);
         (* TODO this should be easy but need to make a function*)
@@ -388,6 +387,7 @@ Definition get_glob_syms (cfg: clightcfg_program) : list ident :=
 
 Definition transl_program (cfg: clightcfg_program) : res (r_program)
   :=
+  (* TODO have to do this at the end (final pass or sth) and not here *)
   let global_symbols := get_glob_syms cfg in
   do translated_fns <-
     AST.transf_globdefs
@@ -395,7 +395,7 @@ Definition transl_program (cfg: clightcfg_program) : res (r_program)
       transl_globvar
       cfg.(prog_defs);
 
-  (* TODO the main renaming should be a separte function or separate pass or something *)
+  (* TODO the main renaming should be a separate function or separate pass or something *)
   let r_prog : r_program :=
     {|
       (* PUBLIC only fns *)

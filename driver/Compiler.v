@@ -21,6 +21,9 @@ Require Ctypes Csyntax Csem Cstrategy Cexec.
 Require Clight.
 Require RustLight.
 Require RustLightgen.
+Require RustLightModifyMain.
+Require RustLightSplitExpr.
+Require RustLightInsertTypeCasts.
 Require ClightCFG.
 Require Csharpminor.
 Require Cminor.
@@ -214,19 +217,15 @@ Definition print_r_program_from_cfg
   @@@ SimplExpr.transl_program
   @@@ ClightCFG.transl_program
   @@@ RustLightgen.transl_program
+  @@@ RustLightSplitExpr.transl_program
+  @@@ RustLightInsertTypeCasts.transl_program
+  @@@ RustLightModifyMain.transl_program
   @@ print (print_Rustlight sym_mapping composite_mapping name)
   @@@ ret.
 
 
-
-  (*OK p*)
-  (*@@@ SimplExpr.transl_program*)
-  (*@@@ RustLight.transl_program*)
-  (*@@ print (print_Rustlight sym_mapping composite_mapping name)*)
-  (*(* TODO is there a less ugly way to do this sequencing *)*)
-  (*@@@ identity_rprog.*)
-
-
+(* NOTE: this is old *)
+(* NOTE: delete this once migration is completed *)
 Definition print_r_program
   (sym_mapping: RustLight.str_map_globals)
   (composite_mapping: RustLight.str_map_composites)

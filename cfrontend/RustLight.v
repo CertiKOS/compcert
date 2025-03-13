@@ -880,7 +880,7 @@ Fixpoint transl_syntax_arglist
       SimplExpr.ret(arg :: args)
   end.
 
-Fixpoint insert_cast_arglist
+Fixpoint insert_cast_arglist'
   (al: list rexpr)
   {struct al}:
   SimplExpr.mon (list rexpr) :=
@@ -888,7 +888,7 @@ Fixpoint insert_cast_arglist
   | nil => SimplExpr.ret(nil)
   | a1 :: a2 =>
       gdo arg <- insert_cast_expr a1 ;
-      gdo args <- insert_cast_arglist a2 ;
+      gdo args <- insert_cast_arglist' a2 ;
       SimplExpr.ret((Ecast arg bang_type) :: args)
   end.
 
@@ -921,7 +921,7 @@ Fixpoint transl_syntax_arglist_with_ty_info
       end
   end.
 
-Fixpoint insert_cast_arglist_with_ty_info
+Fixpoint insert_cast_arglist_with_ty_info'
   (al: list rexpr)
   (tyl: typelist)
   {struct al}:
@@ -933,14 +933,14 @@ Fixpoint insert_cast_arglist_with_ty_info
       | Tnil =>
         (
           gdo arg <- insert_cast_expr a1 ;
-          gdo args <- insert_cast_arglist_with_ty_info a2 Tnil ;
+          gdo args <- insert_cast_arglist_with_ty_info' a2 Tnil ;
           SimplExpr.ret(arg :: args)
         )
       | Tcons ty tyl' =>
       (
           gdo arg <- insert_cast_expr a1 ;
           gdo casted_arg <- i2etc (r_typeof arg) ty arg ;
-          gdo args <- insert_cast_arglist_with_ty_info a2 tyl';
+          gdo args <- insert_cast_arglist_with_ty_info' a2 tyl';
           SimplExpr.ret(casted_arg :: args)
       )
       end
@@ -948,7 +948,7 @@ Fixpoint insert_cast_arglist_with_ty_info
 
 Print typelist.
 
-Fixpoint split_expr_stmt (s: rstatement) {struct s}
+Definition split_expr_stmt (s: rstatement)
                          : SimplExpr.mon rstatement
   :=
     match s with
@@ -1336,12 +1336,12 @@ Fixpoint insert_cast_stmt (gvt_unapplied: (list (ident * type)) -> ident -> res 
       match r_typeof name' with
       | Tfunction tyl t cc =>
         (
-          gdo al' <- insert_cast_arglist_with_ty_info al tyl;
+          gdo al' <- insert_cast_arglist_with_ty_info' al tyl;
           SimplExpr.ret (S_call x name' al')
         )
       | _ =>
         (
-          gdo al' <- insert_cast_arglist al ;
+          gdo al' <- insert_cast_arglist' al ;
           SimplExpr.ret (S_call x name' al')
         )
       end
@@ -1378,7 +1378,9 @@ Fixpoint nat_to_string (n : nat) : string :=
 
 Print PositiveSet.
 
-Definition transl_internal_fun (ce: composite_env) (f: Clight.function)
+Definition transl_internal_fun
+  (ce: composite_env)
+  (f: Clight.function)
   (glob_syms: list ident) : res r_function :=
   let return_type := (Clight.fn_return f) in
   let generator := reconstruct_generator f.(Clight.fn_temps) in
