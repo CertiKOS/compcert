@@ -701,7 +701,8 @@ with handle_switch_aux
 Print option.
 
 
-Definition transl_statement_to_cfg (c_stmt: Clight.statement) : mon ClightCFG :=
+(* TODO need to pass in bool to indicate if this function is main (5.1.2.2.3), because that can implicitly return *)
+Definition transl_statement_to_cfg (c_stmt: Clight.statement) (r_type: type) : mon ClightCFG :=
   do entry_node_uid <- gen_bb_uid;
 
   let init_map := BBMap.add entry_node_uid (bb nil stub) (BBMap.empty BasicBlock) in
@@ -716,6 +717,7 @@ Definition transl_statement_to_cfg (c_stmt: Clight.statement) : mon ClightCFG :=
 
   do (cfg, maybe_unfinished_node, unfinished_goto_nodes)
      <- process_statement_to_cfg initial_cfg entry_node_uid c_stmt None None nil;
+
 
   (* finish up last edge *)
   do cfg1 <-
@@ -733,7 +735,7 @@ Print Errors.Error.
 
 Definition transl_internal_function_to_cfg (c_fn: Clight.function) : Errors.res function :=
   let state := (initial_bb_generator tt) in
-  match transl_statement_to_cfg c_fn.(Clight.fn_body) state with
+  match transl_statement_to_cfg c_fn.(Clight.fn_body) c_fn.(Clight.fn_return) state with
     | OK cfg gen proof  => Errors.OK(
       {|
         fn_return := c_fn.(Clight.fn_return);

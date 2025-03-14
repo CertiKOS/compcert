@@ -90,14 +90,13 @@ Fixpoint split_expr (e: rexpr) {struct e} : mon (sum rexpr ((rstatement) * rexpr
         match inner_split with
         (* Inner expression doesn't need to be assigned more. *)
         | inl _ =>
-
           let assn_stmt := S_set var_ident e1 in
           let res := (assn_stmt, Eaddrof var_expr ty_addrof) in
           ret(inr res)
         | inr (inner_assns, e_inner_final) =>
           let assn_stmt := S_set var_ident e_inner_final in
           let assns := S_sequence inner_assns assn_stmt in
-          let res := (assns, Eaddrof var_expr ty_addrof) in
+          let res := (assns, Eaddrof (Etempvar var_ident e1_ty) ty_addrof) in
           ret(inr res)
         end
       (* turns out we don't need to split the expression *)
@@ -150,11 +149,11 @@ Fixpoint transl_stmt (s: rstatement) : mon rstatement :=
   | S_loop n s1 s2 =>
       gdo tr_s1 <- transl_stmt s1;
       gdo tr_s2 <- transl_stmt s2;
-      ret (S_loop n s1 s2)
+      ret (S_loop n tr_s1 tr_s2)
   | S_loop2 n1 n2 s1 s2 =>
       gdo tr_s1 <- transl_stmt s1;
       gdo tr_s2 <- transl_stmt s2;
-      ret (S_loop2 n1 n2 s1 s2)
+      ret (S_loop2 n1 n2 tr_s1 tr_s2)
   | S_match_int exp ls =>
       gdo tr_ls <- transl_labeled_rstmts ls;
       let gen_res := fun (e: rexpr) => S_match_int e tr_ls in
@@ -183,7 +182,7 @@ Definition transl_internal_function (r_fn: r_function) : res r_function :=
         fn_return := r_fn.(fn_return);
         fn_callconv := r_fn.(fn_callconv);
         fn_vars := r_fn.(fn_vars);
-        fn_temps := r_fn.(fn_temps);
+        fn_temps := tmp_vars;
         fn_body := split_r_body;
         fn_params := r_fn.(fn_params);
         fn_imports := r_fn.(fn_imports);

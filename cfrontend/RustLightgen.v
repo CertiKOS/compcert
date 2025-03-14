@@ -250,19 +250,32 @@ Definition gen_goto_next_bb
   S_sequence set_stmt continue_stmt.
 
 Fixpoint transl_cfg_to_rustlight_sl
-  (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (sl: switch_list)
+  (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (maybe_dflt: option rstatement) (sl: switch_list)
   : SimplExpr.mon labeled_rstatements :=
   match sl with
-  | SLnil s' => ret (LSnil (gen_goto_next_bb cf_lbl_ident s'))
+  | SLnil s' =>
+      ret
+      (match maybe_dflt with
+      | None =>
+          let final_stmt := LSnil (gen_goto_next_bb cf_lbl_ident s') in
+          final_stmt
+      | Some dflt_stmt =>
+          LSnil dflt_stmt
+      end)
   | SLcons maybe_int b sl' =>
-      gdo tr_sl' <- transl_cfg_to_rustlight_sl cfg cf_lbl_ident sl';
-      ret (LScons maybe_int (gen_goto_next_bb cf_lbl_ident b) tr_sl')
+      match maybe_int with
+      | None =>
+          let final_stmt := gen_goto_next_bb cf_lbl_ident b in
+          transl_cfg_to_rustlight_sl cfg cf_lbl_ident (Some final_stmt) sl'
+      | Some _ =>
+        gdo tr_sl' <- transl_cfg_to_rustlight_sl cfg cf_lbl_ident maybe_dflt sl';
+        ret (LScons maybe_int (gen_goto_next_bb cf_lbl_ident b) tr_sl')
+      end
   end.
 
 
 Definition transl_cfg_to_rustlight_aux
-  (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (cur_node: bb_uid)
-  (* TODO more metadata will probably go here *)
+  (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (cur_node: bb_uid) (r_ty: type)
   : SimplExpr.mon rstatement :=
   gdo block <- get_bb cfg cur_node;
   match block with
@@ -280,16 +293,25 @@ Definition transl_cfg_to_rustlight_aux
           let rs := S_if_then_else r_cexp r_b_true r_b_false in
           ret rs
       | terminate maybe_exp =>
-          gdo tr_exp <-
-            match maybe_exp with
-            | Some exp =>
-                gdo e <- transl_syntax_expr exp;
-                ret (Some(e, r_typeof e))
-            | None => ret None
-            end;
-          ret (S_return tr_exp)
+          (* There's three options *)
+          (* - return something*)
+          (* - artificially inserted return by cfg translation that returns nothing (needs to be turned into a skip)*)
+          (* - actually returning nothing *)
+          match maybe_exp with
+          | Some exp =>
+              gdo e <- transl_syntax_expr exp;
+              ret (S_return (Some(e, r_typeof e)))
+          | None => (
+              (* TODO will also need to pass main type in because section 5.1.2.2.3 *)
+              ret (
+                match r_ty with
+                | Tvoid => S_return None
+                | _ => S_skip
+                end
+              ))
+          end
       | switch cexp sl =>
-        gdo lrstmts <- transl_cfg_to_rustlight_sl cfg cf_lbl_ident sl;
+        gdo lrstmts <- transl_cfg_to_rustlight_sl cfg cf_lbl_ident None sl;
         gdo tr_exp <- transl_syntax_expr cexp;
         ret (S_match_int tr_exp lrstmts)
       | stub => SimplExpr.error(Errors.msg "stub edge encountered")
@@ -298,11 +320,11 @@ Definition transl_cfg_to_rustlight_aux
   )
   end.
 
-Fixpoint transl_cfg_nodes_to_rustlight (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (nodes : list bb_uid) : SimplExpr.mon labeled_rstatements :=
+Fixpoint transl_cfg_nodes_to_rustlight (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (nodes : list bb_uid) (r_ty: type): SimplExpr.mon labeled_rstatements :=
   match nodes with
   | n :: nodes' => (
-      gdo r_block <- transl_cfg_to_rustlight_aux cfg cf_lbl_ident n;
-      gdo rest <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident nodes';
+      gdo r_block <- transl_cfg_to_rustlight_aux cfg cf_lbl_ident n r_ty;
+      gdo rest <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident nodes' r_ty;
       ret (LScons (Some (Z.pos n)) r_block rest)
   )
   | nil =>
@@ -311,7 +333,7 @@ Fixpoint transl_cfg_nodes_to_rustlight (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (
       ret (LSnil S_skip)
   end.
 
-Definition transl_cfg_to_rustlight (cfg: ClightCFG) : SimplExpr.mon rstatement :=
+Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon rstatement :=
   gdo cf_lbl_ident <- SimplExpr.gensym bbuid_ty;
   let entry_uid := cfg.(entry) in
   let s_stmt := S_set cf_lbl_ident (bb_to_rexpr entry_uid) in
@@ -319,7 +341,7 @@ Definition transl_cfg_to_rustlight (cfg: ClightCFG) : SimplExpr.mon rstatement :
   (* map transl_cfg_to_rustlight_aux over cfg nodes *)
   (* each node becomes a switch *)
   (*transl_cfg_to_rustlight_aux cfg cfg.(entry) entry_uid.*)
-  gdo r_list <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident (BBSet.elements nodes);
+  gdo r_list <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident (BBSet.elements nodes) r_ty;
   let m_stmt := S_match_int (Etempvar cf_lbl_ident bbuid_ty) r_list in
   let l_stmt := S_loop None m_stmt S_skip in
   let seq_stmt := S_sequence s_stmt l_stmt in
@@ -334,7 +356,7 @@ Definition gen_r_cc (cc: calling_convention) : res (r_calling_convention) :=
 
 Definition transl_internal_function_to_rustlight (c_fn: ClightCFG.function) (glob_syms: list ident) : Errors.res r_function :=
   let generator := reconstruct_generator c_fn.(ClightCFG.fn_temps) in
-  match transl_cfg_to_rustlight (fst c_fn.(ClightCFG.fn_body)) generator with
+  match transl_cfg_to_rustlight (fst c_fn.(ClightCFG.fn_body)) c_fn.(ClightCFG.fn_return) generator with
     | SimplExpr.Res r_body r_g i  =>
       do rcc <- gen_r_cc c_fn.(ClightCFG.fn_callconv);
 

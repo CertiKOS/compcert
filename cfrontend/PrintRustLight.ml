@@ -631,8 +631,8 @@ let rec print_stmt fmt body =
 
 and print_cases fmt cases =
   match cases with
-  | LSnil _ ->
-      fprintf fmt "@[<v 2>_ => () @]@;";
+  | LSnil body ->
+      fprintf fmt "@[<v 2>_ => {@;%a@;<0 -2>}@]@;" print_stmt body
   | LScons (n, body, stmts) ->
       (match n with
       | Some(n') -> fprintf fmt "@[<v 2>%s => {@;%a@;<0 -2>}@]@;" (Z.to_string n') print_stmt body

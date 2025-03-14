@@ -249,7 +249,7 @@ Definition expr_should_be_split (e: rexpr) : bool :=
   | Econst_long l ty => true
   | Evar id ty =>
       match ty with
-      | Ctypes.Tfunction _ _ _=> true
+      | Ctypes.Tfunction _ _ _ => true
       | _ => false
       end
   | Etempvar id ty =>
