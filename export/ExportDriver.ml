@@ -191,7 +191,7 @@ let compile_c_file sourcename ifile ofile =
   )
   | Mode_Rustlight -> (
       match
-        (Compiler.print_r_program !sym_mapping !composite_mapping
+        (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping
                module_name cs) with
       | Errors.OK rprog -> (
           let oc = open_out ofile in

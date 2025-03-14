@@ -183,6 +183,7 @@ Definition transl_clightcfg_instruction (inst: Instruction)
       match r_typeof fn_name_rust with
       | Tfunction tyl t cc =>
         (
+          (* TODO move this fn to this file *)
           do al' <- transl_syntax_arglist_with_ty_info al tyl;
           ret (S_call x fn_name_rust al')
         )
@@ -356,6 +357,8 @@ Definition transl_internal_function_to_rustlight (c_fn: ClightCFG.function) (glo
         fn_vars := c_fn.(ClightCFG.fn_vars);
         fn_temps := r_g.(SimplExpr.gen_trail);
         fn_body := r_body;
+        (* TODO should be doing this in a separate step *)
+        (* NOTE: it doesn't matter when we do this because we only add local variables*)
         fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
         fn_is_safe := false;
       |})

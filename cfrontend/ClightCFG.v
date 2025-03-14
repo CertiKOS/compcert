@@ -246,7 +246,7 @@ Definition set_edge_in_bb (cfg: ClightCFG) (target_bb_uid: bb_uid) (edge: BBEdge
   | bb insts old_edge => (
 
     (* create new node with additional instruction *)
-    let new_bb := bb insts edge in
+    let new_bb := bb (List.rev insts) edge in
     let new_new_map := BBMap.add target_bb_uid new_bb new_map in
     ret
     {|

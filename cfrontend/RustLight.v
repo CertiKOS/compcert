@@ -11,7 +11,6 @@ Require Import Errors.
 Require Import Cop.
 Require Import Memory.
 Require Import Globalenvs.
-Require Import Memory.
 Require SimplExpr.
 Require Clight.
 Require Cshmgen.

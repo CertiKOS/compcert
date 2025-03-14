@@ -78,7 +78,7 @@ Definition i2etc
   | (Ctypes.Tlong Unsigned _, Ctypes.Tlong Unsigned _)
   | (Ctypes.Tlong Signed _, Ctypes.Tlong Signed _)
   | (Ctypes.Tfloat F32 _, Ctypes.Tfloat F32 _)
-  | (Ctypes.Tfloat F64 _, Ctypes.Tfloat F64 _)
+  | (Ctypes.Tfloat F64 _, Ctypes.Tfloat F64 _) => ret expr
   | (_, Ctypes.Tint IBool _ _) => gen_cast_for_conditional expr
   | (Ctypes.Tint IBool _ a, Ctypes.Tfloat F32 _)
   | (Ctypes.Tint IBool _ a, Ctypes.Tfloat F64 _) =>
@@ -349,8 +349,6 @@ Fixpoint insert_cast_stmt (gvt: ident -> res type) (f_rty: type) (stmt: rstateme
       do coerced_type <- i2etc (r_typeof r_rval) (r_typeof r_lval) (r_rval) ;
       let s := nuke_equalities coerced_type in
       ret(S_assign r_lval s)
-      (* let gen_res := fun (e: rexpr) => S_assign r_lval e in *)
-      (* process_expr s gen_res *)
   | S_set x exp =>
       do r_exp <- insert_cast_expr exp;
       do expected_type <- gvt x;
@@ -439,8 +437,20 @@ Definition get_ty_of_var_rust
 
 
 Definition transl_internal_function (r_fn: r_function) : res r_function :=
-  let ty_map := get_ty_of_var_rust r_fn
-  in Error(msg "unimplemented").
+  let ty_map := get_ty_of_var_rust r_fn in
+  let f_rty := r_fn.(fn_return) in
+  let body := r_fn.(fn_body) in
+  do new_body <- insert_cast_stmt ty_map f_rty body;
+  ret {|
+    fn_return := r_fn.(fn_return);
+    fn_callconv := r_fn.(fn_callconv);
+    fn_vars := r_fn.(fn_vars);
+    fn_temps := r_fn.(fn_temps);
+    fn_body := new_body;
+    fn_params := r_fn.(fn_params);
+    fn_imports := r_fn.(fn_imports);
+    fn_is_safe := r_fn.(fn_is_safe);
+  |}.
 
 Definition transl_fundef_r
   (id: ident)

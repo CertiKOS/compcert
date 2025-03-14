@@ -202,8 +202,6 @@ Definition print_clightcfg
   @@ print (print_clightcfg_in_ml)
   @@@ ret.
 
-Notation "'TODO'" := (ltac:(fail "TODO: implement this")) (at level 0).
-
 Locate transl_program.
 
 Definition print_r_program_from_cfg
@@ -217,6 +215,8 @@ Definition print_r_program_from_cfg
   @@@ SimplExpr.transl_program
   @@@ ClightCFG.transl_program
   @@@ RustLightgen.transl_program
+  (* note: this has to go before the type casts *)
+  (* since that is not idempotent *)
   @@@ RustLightSplitExpr.transl_program
   @@@ RustLightInsertTypeCasts.transl_program
   @@@ RustLightModifyMain.transl_program
