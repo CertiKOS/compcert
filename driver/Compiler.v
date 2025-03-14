@@ -216,27 +216,11 @@ Definition print_r_program_from_cfg
   @@@ ClightCFG.transl_program
   @@@ RustLightgen.transl_program
   (* note: this has to go before the type casts *)
-  (* since that is not idempotent *)
+  (* since that is not idempotent. Morally speaking it really should be *)
   @@@ RustLightSplitExpr.transl_program
   @@@ RustLightInsertTypeCasts.transl_program
   @@@ RustLightModifyMain.transl_program
   @@ print (print_Rustlight sym_mapping composite_mapping name)
-  @@@ ret.
-
-
-(* NOTE: this is old *)
-(* NOTE: delete this once migration is completed *)
-Definition print_r_program
-  (sym_mapping: RustLight.str_map_globals)
-  (composite_mapping: RustLight.str_map_composites)
-  (name: string)
-  (p: Csyntax.program)
-  : res RustLight.r_program :=
-  OK p
-  @@@ SimplExpr.transl_program
-  @@@ RustLight.transl_program
-  @@ print (print_Rustlight sym_mapping composite_mapping name)
-  (* TODO is there a less ugly way to do this sequencing *)
   @@@ ret.
 
 

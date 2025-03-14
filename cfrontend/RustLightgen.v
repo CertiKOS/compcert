@@ -165,6 +165,98 @@ Definition reverse_postorder_traversal_gen
 
 Print msg.
 
+Fixpoint transl_syntax_expr (a: Clight.expr) {struct a}
+  : SimplExpr.mon (rexpr) :=
+  match a with
+  | Clight.Econst_int n ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret (Econst_int n ty)
+  | Clight.Econst_float n ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret(Econst_float n ty)
+  | Clight.Econst_single n ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret(Econst_single n ty)
+  | Clight.Econst_long n ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret(Econst_long n ty)
+  | Clight.Evar id ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret(Evar id ty)
+  | Clight.Etempvar id ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret(Etempvar id ty)
+  | Clight.Ederef b ty =>
+      (*do unused <- check_ty ty;*)
+      do tb <- transl_syntax_expr b;
+      SimplExpr.ret(Ederef tb ty)
+  | Clight.Eaddrof b ty =>
+      (*do unused <- check_ty ty;*)
+      do tb <- transl_syntax_expr b;
+      SimplExpr.ret(Eaddrof tb ty)
+  | Clight.Eunop op exp ty =>
+      (*do unused <- check_ty ty;*)
+      do translated_exp <- transl_syntax_expr exp;
+      SimplExpr.ret(Eunop op translated_exp ty)
+  | Clight.Ebinop op exp1 exp2 ty =>
+      (*do unused <- check_ty ty;*)
+      do rexp1 <- transl_syntax_expr exp1;
+      do rexp2 <- transl_syntax_expr exp2;
+      SimplExpr.ret(Ebinop op rexp1 rexp2 ty)
+  | Clight.Ecast exp ty =>
+      (*do unused <- check_ty ty;*)
+      do rexp <- transl_syntax_expr exp;
+      SimplExpr.ret(Ecast rexp ty)
+  | Clight.Efield exp ident ty =>
+      (*do unused <- check_ty ty;*)
+      do rexp <- transl_syntax_expr exp;
+      SimplExpr.ret(Efield rexp ident ty)
+  | Clight.Esizeof ty' ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret(Esizeof ty' ty)
+  | Clight.Ealignof ty' ty =>
+      (*do unused <- check_ty ty;*)
+      SimplExpr.ret(Ealignof ty' ty)
+  end.
+
+Fixpoint transl_syntax_arglist
+  (al: list Clight.expr)
+  {struct al}:
+  SimplExpr.mon (list rexpr) :=
+  match al with
+  | nil => SimplExpr.ret(nil)
+  | a1 :: a2 =>
+      do arg <- transl_syntax_expr a1 ;
+      do args <- transl_syntax_arglist a2 ;
+      SimplExpr.ret(arg :: args)
+  end.
+
+Fixpoint transl_syntax_arglist_with_ty_info
+  (al: list Clight.expr)
+  (tyl: typelist)
+  {struct al}:
+  SimplExpr.mon (list rexpr) :=
+  match al with
+  | nil => SimplExpr.ret(nil)
+  | a1 :: a2 =>
+      match tyl with
+      | Tnil =>
+        (
+          do arg <- transl_syntax_expr a1 ;
+          do args <- transl_syntax_arglist_with_ty_info a2 Tnil ;
+          SimplExpr.ret(arg :: args)
+        )
+      | Tcons ty tyl' =>
+      (
+          do arg <- transl_syntax_expr a1 ;
+          (* TODO laso don't need this *)
+          (* gdo casted_arg <- i2etc (r_typeof arg) ty arg ; *)
+          do args <- transl_syntax_arglist_with_ty_info a2 tyl';
+          SimplExpr.ret(arg :: args)
+      )
+      end
+  end.
+
 (* for now essentially copying transl_syntax_statement *)
 (* TODO process_expr will happen later *)
 Definition transl_clightcfg_instruction (inst: Instruction)

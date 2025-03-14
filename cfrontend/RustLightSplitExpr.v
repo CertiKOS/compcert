@@ -12,6 +12,36 @@ Import List.ListNotations.
 
 Local Open Scope gensym_monad_scope_2.
 
+(* we are being very conservative here. That's fine. *)
+Definition expr_should_be_split (e: rexpr) : bool :=
+  match e with
+  | Econst_int n ty => true
+  | Econst_float f ty => true
+  | Econst_single f32 ty => true
+  | Econst_long l ty => true
+  | Evar id ty =>
+      match ty with
+      | Ctypes.Tfunction _ _ _ => true
+      | _ => false
+      end
+  | Etempvar id ty =>
+      match ty with
+      | Ctypes.Tfunction _ _ _ => true
+      | _ => false
+      end
+  (* a reborrow is usually fine, but we want to be conservative *)
+  | Ederef e1 ty =>  true
+  | Eunop op e1 ty => true
+  | Ebinop op e1 e2 ty => true
+  | Ecast e1 ty => true
+  | Efield e1 id ty => true
+  | Esizeof t1 ty => true
+  | Ealignof t1 ty => true
+  | Enull_check e1 => true
+  | Eaddrof e1 ty => true
+  end.
+
+
 (* in order to reflect move semantics, sometimes we may need to split expressions based
    on the expression contents. *)
 Fixpoint split_expr (e: rexpr) {struct e} : mon (sum rexpr ((rstatement) * rexpr)) :=

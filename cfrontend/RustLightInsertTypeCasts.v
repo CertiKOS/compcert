@@ -6,6 +6,7 @@ Require Import Ctypes.
 Require Import AST.
 Require Import ZArith.
 Require Import Integers.
+Require Import Axioms Coqlib.
 Require Import List.
 Import List.ListNotations.
 
@@ -23,6 +24,31 @@ Notation "'do' ( X , Y , Z ) <- A ; B" := (bind3 A (fun X Y Z => B))
    : error_monad_ext_scope.
 
 Local Open Scope error_monad_ext_scope.
+
+Fixpoint nuke_equalities (e: rexpr) : rexpr :=
+  match e with
+  | Econst_int _ _ => e
+  | Econst_float _ _ => e
+  | Econst_single _ _ => e
+  | Econst_long _ _ => e
+  | Evar _ _ => e
+  | Etempvar _ _ => e
+  | Ederef e' ty => Ederef (nuke_equalities e') ty
+  | Eaddrof e' ty => Eaddrof (nuke_equalities e') ty
+  | Eunop op e' ty => Eunop op (nuke_equalities e') ty
+  | Ebinop op e' e'' ty => Ebinop op (nuke_equalities e') (nuke_equalities e'') ty
+  | Ecast e' ty =>
+      let not_fn_ptr := negb (is_fn_ptr ty) in
+      let types_match := type_eq (r_typeof e') ty in
+      if andb not_fn_ptr types_match then e' else e
+  | Efield e' id ty => Efield (nuke_equalities e') id ty
+  | Esizeof _ _ => e
+  | Ealignof _ _ => e
+  (* | Eif_then_else e' e'' e''' ty => *)
+  (*     Eif_then_else (nuke_equalities e') (nuke_equalities e'') (nuke_equalities e''') ty *)
+  | Enull_check e' => Enull_check (nuke_equalities e')
+  end.
+
 
 Inductive needs_coersion : Type :=
   (* cast on first expression, overall type *)

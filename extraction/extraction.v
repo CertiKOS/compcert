@@ -163,7 +163,6 @@ Cd "extraction".
 Separate Extraction
    Compiler.print_r_program_from_cfg
    Compiler.transf_c_program Compiler.transf_cminor_program
-   Compiler.print_r_program
    Compiler.print_clightcfg
    Compiler.get_exports
    Cexec.do_initial_state Cexec.do_step Cexec.at_final_state
