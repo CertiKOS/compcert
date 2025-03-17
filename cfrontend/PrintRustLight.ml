@@ -219,10 +219,10 @@ let map_to_unsigned =
 let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust false ty)
 
 let print_primitive_init fmt ty = function
-  | Init_int8 n -> fprintf fmt"%ld" (camlint_of_coqint n)
-  | Init_int16 n -> fprintf fmt "%ld" (camlint_of_coqint n)
-  | Init_int32 n -> fprintf fmt "%ld" (camlint_of_coqint n)
-  | Init_int64 n -> fprintf fmt "%Ld" (camlint64_of_coqint n)
+  | Init_int8 n -> fprintf fmt"(%ld as libc::c_char)" (camlint_of_coqint n)
+  | Init_int16 n -> fprintf fmt "(%ld as libc::c_short)" (camlint_of_coqint n)
+  | Init_int32 n -> fprintf fmt "(%ld as libc::c_int)" (camlint_of_coqint n)
+  | Init_int64 n -> fprintf fmt "(%Ld as libc::c_long)" (camlint64_of_coqint n)
   | Init_float32 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_float64 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_space n -> fprintf fmt "(0 as %s)" (gen_ty_rust false ty)
