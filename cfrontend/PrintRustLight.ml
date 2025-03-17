@@ -73,6 +73,12 @@ let extern_atom_r a =
   with Not_found ->
     "main"
 
+let get_len_of_char_arr (t: coq_type) =
+  match t with
+  | Tarray(_, l, _) ->
+      Some(camlint_of_coqint l|> Int32.to_int)
+  | _ -> None
+
 (* open TODOs: *)
 (* - IMPLICIT CONVERSIONS !*)
 (*   - assignment void* to any pointer type  *)
@@ -102,7 +108,6 @@ let extern_atom_r a =
 (* - improve janky identifier for explicit lifetimes and gotos *)
 (* - glibc types should be special cased in a better way. Pass in headerfile information/add headerfile information to map *)
 (* - enum test, somehow deal with stripped enum information *)
-(* - relooper  *)
 
 (* let is_ptr *)
 
@@ -323,8 +328,15 @@ let rec print_composite_init fmt tds arr ty =
   (*     ) arr; *)
   (*   fprintf fmt "]" *)
 
-let string_of_init id =
-  let b = Buffer.create (List.length id) in
+let string_of_init fmt id (expected_length: int option) =
+  let (b, extras) =
+    match expected_length with
+    | Some l ->
+        let differing_len = l - (List.length id) in
+        fprintf fmt "/* \nLEN %d, expected_length %d, diff: %d */ \n" (List.length id) l differing_len;
+        (Buffer.create l, differing_len)
+    | None -> (Buffer.create (List.length id), 0)
+  in
   let add_init = function
   | Init_int8 n ->
       let c = Int32.to_int (camlint_of_coqint n) in
@@ -333,9 +345,14 @@ let string_of_init id =
       else
         if Char.code '\000' == c then Buffer.add_string b "\\0"
         else if Char.code '\n' == c then Buffer.add_string b "\\n"
+        else if Char.code '\t' == c then Buffer.add_string b "\\t"
+        else Buffer.add_string b (Printf.sprintf "\\%03o" c)
   | _ ->
       assert false
-  in List.iter add_init id; Buffer.contents b
+  in
+  let rec add_extras l' =
+    if l' <= 0 then () else (Buffer.add_string b "\\0"; add_extras (l'-1))
+  in List.iter add_init id; add_extras extras; Buffer.contents b
 
 let print_globvar fmt tds id v =
   let name_bare = extern_atom_r id in
@@ -360,7 +377,7 @@ let print_globvar fmt tds id v =
         [i1] ->
           fprintf fmt "@[<hov 2>%s = unsafe {(" (gen_name_and_ty_rust name v.gvar_info);
           print_primitive_init fmt v.gvar_info i1; fprintf fmt " as %s) }" (gen_ty_rust false v.gvar_info)
-      | _, il ->
+      | ty, il ->
           if Str.string_match re_string_literal (extern_atom_r id) 0
           && List.for_all (function Init_int8 _ -> true | _ -> false) il
           then
@@ -370,7 +387,7 @@ let print_globvar fmt tds id v =
               (* We're black boxing the entire thing and just saying "this is what we expect it to be"  *)
               fprintf fmt "@[<hov 2>%s = unsafe { std::mem::transmute("
                 (gen_name_and_ty_rust name v.gvar_info);
-              fprintf fmt "*b\"%s\")}" (string_of_init (il))
+              fprintf fmt "*b\"%s\")}" (string_of_init fmt (il) (get_len_of_char_arr v.gvar_info))
             )
           else
             (
