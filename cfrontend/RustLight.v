@@ -269,7 +269,7 @@ Definition gen_zero_const (ty: type) : res rexpr :=
   | Ctypes.Tint _ _ _ => OK(Econst_int (Int.repr 0) ty)
   | Ctypes.Tfloat Ctypes.F64 _ => OK(Econst_float (Bits.b64_of_bits 0%Z) ty)
   | Ctypes.Tfloat Ctypes.F32 _ => OK(Econst_single (Bits.b32_of_bits 0%Z) ty)
-  | Ctypes.Tpointer ty a => OK(void_pointer_int ty)
+  | Ctypes.Tpointer ty a => OK(void_pointer_int (Ctypes.Tpointer ty a))
   (* TODO may need array decay *)
   | ty => Error (msg (String.append "Encountered unexpected type that has no zero constant" (type_to_string ty)))
   end

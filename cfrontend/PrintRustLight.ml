@@ -68,8 +68,8 @@ let extern_atom_r a =
     let res = Hashtbl.find string_of_atom a in
     (* let _ = printf "NAMEVAR: %s\n" res in *)
     if res = "main" then "main_2" else
-      (* if StringSet.mem res rust_keywords then "r#" ^ res else res *)
-      res
+      if StringSet.mem res rust_keywords then "r#" ^ res else res
+      (* res *)
   with Not_found ->
     "main"
 
@@ -447,6 +447,7 @@ let rec print_expr fmt e =
     | (_, Ctypes.Tpointer(_, _), Ctypes.Tlong(_, _)) -> (
         handle_ptr_arithmetic fmt op_type e1 e2
       )
+    (* TODO these only differ slightly. Shouldn't need so much repeated code *)
     | (Cop.Osub, Ctypes.Tpointer(_, _), Ctypes.Tpointer(_, _)) -> (
         fprintf fmt "(%a).offset_from(%a)" print_expr e1 print_expr e2
       )
@@ -534,8 +535,11 @@ let rec print_expr fmt e =
         else
           printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2;
           fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty); ()
+      (* if this is the zero constant, we're going to print int -> pointer *)
       | (_, _) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2;
-        fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty);
+        fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
+
+        (* fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty); *)
     )
 
     (* somewhat complicated because we might want to use *)
@@ -634,7 +638,7 @@ let rec print_stmt fmt body =
     )
   (* the difference between these two cases is the assignment to a temporary var vs discard *)
   | S_call(Some(id), name, arg_list) -> (
-      fprintf fmt "@[<hv 2>%s =@ %a@,(@[<hov 0>%a@]);@]"
+      fprintf fmt "@[<hv 2>%s =@ %a(@[<hov 0>%a@]);@]"
         (temp_name id)
         print_expr name
         print_arglist arg_list
