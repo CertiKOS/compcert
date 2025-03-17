@@ -415,17 +415,23 @@ let rec print_expr fmt e =
   | RustLight.Etempvar (id, _ty) -> fprintf fmt "%s" (temp_name id)
   | RustLight.Eunop (op_ty, exp, ty) ->
     (
-      let op_name =
-      begin match op_ty with
-      (* conversion to bool *)
-      | Cop.Onotbool -> "!"
-      (* bitwise not is ! in rust *)
-      | Cop.Onotint -> "!"
-      | Cop.Oneg -> "-"
-      | Cop.Oabsfloat -> "UNSUPPORTED OP"
-      end
-      in
-      fprintf fmt "((%s%a) as %s)" op_name print_expr exp (gen_ty_rust false ty);
+      match op_ty, ty with
+      | Cop.Oneg, Ctypes.Tint(Ctypes.I32, Ctypes.Unsigned, _) ->
+        fprintf fmt "((%a).wrapping_neg() as %s)" print_expr exp (gen_ty_rust false ty)
+      (* TODO this is cursed. Could be cleaned up *)
+      | _ -> (
+        let op_name =
+        begin match op_ty with
+        (* conversion to bool *)
+        | Cop.Onotbool -> "!"
+        (* bitwise not is ! in rust *)
+        | Cop.Onotint -> "!"
+        | Cop.Oneg -> "-"
+        | Cop.Oabsfloat -> "UNSUPPORTED OP"
+        end
+        in
+        fprintf fmt "((%s%a) as %s)" op_name print_expr exp (gen_ty_rust false ty)
+      )
     )
   | RustLight.Ebinop (op_type, e1, e2, ty) -> (
     begin match (op_type, type_of_expr e1, type_of_expr e2) with
@@ -443,6 +449,21 @@ let rec print_expr fmt e =
       )
     | (Cop.Osub, Ctypes.Tpointer(_, _), Ctypes.Tpointer(_, _)) -> (
         fprintf fmt "(%a).offset_from(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Osub, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_sub(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Oadd, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_add(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Omul, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_mul(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Odiv, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_div(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Omod, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_rem(%a)" print_expr e1 print_expr e2
       )
     | (_, _, _) ->
     (
@@ -901,29 +922,28 @@ let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_de
   tbl
 
 let print_if
-
-    (clunky_sym_mapping: str_map_globals)
-    (clunky_composite_mapping: str_map_composites)
-    (clunky_mod_name: char list)
-    prog =
-  match !destination with
-  | None -> ()
-  | Some f ->
-    (* We need ocaml strings to print out variable names. *)
-    (* We should do that all at once to avoid repeatedly converting. *)
-    (* Since we have to iterate over all the data anyway, might as well convert *)
-    (* to a more efficient representation *)
-    let sym_mapping = fix_mapping_types clunky_sym_mapping in
-    let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
+  (clunky_sym_mapping: str_map_globals)
+  (clunky_composite_mapping: str_map_composites)
+  (clunky_mod_name: char list)
+  prog =
     let mod_name = List.to_seq clunky_mod_name |> String.of_seq in
-    printf "\nUUID mod_name %s\n" mod_name;
-    (* let len_mapping = Hashtbl.length mapping in *)
-    printf "UUID hashtbl";
-    pretty_print_hashtbl composite_mapping;
-    change_directory "./rust_project/src/";
-    printf "DOIN opening out: %s\n" f;
-    let oc = open_out f in
-    printf "DOING success opening out\n";
-    print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog;
-    close_out oc;
-    change_directory "../..";
+    match !destination with
+    | None -> printf "MISSING DEST FOR %s" mod_name
+    | Some f ->
+      (* We need ocaml strings to print out variable names. *)
+      (* We should do that all at once to avoid repeatedly converting. *)
+      (* Since we have to iterate over all the data anyway, might as well convert *)
+      (* to a more efficient representation *)
+      let sym_mapping = fix_mapping_types clunky_sym_mapping in
+      let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
+      printf "\nUUID mod_name %s\n" mod_name;
+      (* let len_mapping = Hashtbl.length mapping in *)
+      printf "UUID hashtbl";
+      pretty_print_hashtbl composite_mapping;
+      change_directory "./rust_project/src/";
+      printf "DOIN opening out: %s\n" f;
+      let oc = open_out f in
+      printf "DOING success opening out\n";
+      print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog;
+      close_out oc;
+      change_directory "../..";

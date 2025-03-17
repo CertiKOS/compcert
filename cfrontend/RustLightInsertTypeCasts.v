@@ -16,6 +16,7 @@ Declare Scope error_monad_ext_scope.
 
 Definition ret {A: Type} (x : A) : res A  := OK x.
 
+(* TODO this is duplicated. dedup. *)
 Definition bind3 {A B C D: Type} (x: res (A * B * C)) (f: A -> B -> C -> res D) : res D :=
   bind x (fun '(a, b, c) => f a b c).
 
@@ -24,6 +25,8 @@ Notation "'do' ( X , Y , Z ) <- A ; B" := (bind3 A (fun X Y Z => B))
    : error_monad_ext_scope.
 
 Local Open Scope error_monad_ext_scope.
+
+Definition is_zero_const (e: rexpr) : bool := false.
 
 Fixpoint nuke_equalities (e: rexpr) : rexpr :=
   match e with
@@ -120,6 +123,7 @@ Definition i2etc
        ret (Ecast expr desired_type)
   end.
 
+(*Definition do_binop_coersion (t1: type) (t2: type) (t1_is_zero: bool) (t2_is_zero: bool) : needs_coersion :=*)
 Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   let neither := NC_neither t1 in
   let first_to_second := NC_first (i2etc t1 t2) t2 in
@@ -142,7 +146,7 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   | (Ctypes.Tlong Unsigned _, Ctypes.Tlong Unsigned _)
   | (Ctypes.Tlong Signed _, Ctypes.Tlong Signed _)
   | (Ctypes.Tfloat F32 _, Ctypes.Tfloat F32 _)
-  | (Ctypes.Tfloat F64 _, Ctypes.Tfloat F64 _) =>   neither
+  | (Ctypes.Tfloat F64 _, Ctypes.Tfloat F64 _) => neither
 
   (* btwn integers *)
   | (Ctypes.Tint I32 Unsigned _, Ctypes.Tint I32 Signed _) => second_to_first
@@ -208,6 +212,17 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   | ( Ctypes.Tlong _ _ , Ctypes.Tarray ty_inner _num attr) =>
       let target_ty := Ctypes.Tpointer ty_inner attr in
       NC_second (i2etc t2 target_ty) target_ty
+  | (Ctypes.Tpointer Ctypes.Tvoid _attr, (Ctypes.Tpointer ty' attr') as target_ty) =>
+    match ty' with
+    | Ctypes.Tvoid => NC_neither t1
+    | _ => NC_first (i2etc t1 target_ty) target_ty
+    end
+
+  | ((Ctypes.Tpointer ty' _) as target_ty, Ctypes.Tpointer Ctypes.Tvoid _) =>
+    match ty' with
+    | Ctypes.Tvoid => NC_neither t1
+    | _ => NC_second (i2etc t2 target_ty) target_ty
+    end
   | (_, _) => NC_neither t1
   end.
 
@@ -293,6 +308,7 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
       do unused <- check_ty ty;
       do rexp1 <- insert_cast_expr exp1;
       do rexp2 <- insert_cast_expr exp2;
+      (* TODO this is obfuscated. Can just do the casting directly *)
       do (c_rexp1, c_rexp2, rty) <-
         match do_binop_coersion (r_typeof rexp1) (r_typeof rexp2) with
         | NC_first f rty =>

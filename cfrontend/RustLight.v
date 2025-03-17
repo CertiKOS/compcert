@@ -133,10 +133,6 @@ Definition r_typeof (e: rexpr) : type :=
 
 Print sum.
 
-
-Definition void_pointer_int (ty: Ctypes.type) := Econst_int (Int.repr 0) ty.
-(* Definition void_pointer (ty: Ctypes.type) := Eaddr_of () (Ctypes.Tpointer Ctypes.Tvoid noattr) *)
-
 (* output type of ! *)
 Definition bang_type := Ctypes.Tint I32 Signed Ctypes.noattr.
 Definition bang_type_unsigned := Ctypes.Tint I32 Unsigned Ctypes.noattr.
@@ -264,13 +260,17 @@ Definition gen_zero_const_clight (ty: type) : res Clight.expr :=
   .
 
 
+Definition void_pointer_int (ty: Ctypes.type) := Ecast (Econst_int (Int.repr 0) (Ctypes.Tint I32 Signed noattr)) ty.
+(* Definition void_pointer (ty: Ctypes.type) := Eaddr_of () (Ctypes.Tpointer Ctypes.Tvoid noattr) *)
+
 Definition gen_zero_const (ty: type) : res rexpr :=
   match ty with
   | Ctypes.Tlong _ _ => OK(Econst_long (Int64.repr 0) ty)
   | Ctypes.Tint _ _ _ => OK(Econst_int (Int.repr 0) ty)
   | Ctypes.Tfloat Ctypes.F64 _ => OK(Econst_float (Bits.b64_of_bits 0%Z) ty)
   | Ctypes.Tfloat Ctypes.F32 _ => OK(Econst_single (Bits.b32_of_bits 0%Z) ty)
-  (* TODO not immediately needed but should add in null pointer*)
+  | Ctypes.Tpointer ty a => OK(void_pointer_int ty)
+  (* TODO may need array decay *)
   | ty => Error (msg (String.append "Encountered unexpected type that has no zero constant" (type_to_string ty)))
   end
   .
