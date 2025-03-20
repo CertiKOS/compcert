@@ -1,12 +1,15 @@
+[@@@ocaml.warning "-66"]
 open Format
 open! Ctypes
 open AST
 open Camlcoq (*for extern_atom*)
 open RustLight
+open! LibcSymbols
 exception Panic of string
 
 (* pulled from https://doc.rust-lang.org/book/appendix-01-keywords.html *)
 module StringSet = Set.Make(String)
+
 let rust_keywords  = StringSet.of_list [
   "as";
   "async";
@@ -780,6 +783,7 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
   List.fold_left
     (fun acc id ->
        let name = extern_atom_r id in
+       let _ = printf "USED NAME %s" name in
        let maybe_module = Hashtbl.find_opt mapping name in
        match maybe_module with
        (* TODO this is the exact line where we can insert libc symbols. It would be good to know what those symbols are, though. *)
@@ -811,6 +815,22 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
     )
     cur_sym_map list_of_ids
 
+let [@warning "-42"] get_used_tys_from_fns
+    (fn_defs: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list)) =
+  List.fold_left (
+    fun acc (elt: AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) ->
+      match elt with
+      (* TODO should probably pull in the types from this too but this requires rustlight changes*)
+      | (_id, Gvar v) -> acc
+      | (id, Gfun Internal rf) ->
+          let fn_name = extern_atom_r id in
+          let r_used_types = rf.fn_ty_imports in
+          printf "\n\n function %s has %d imports \n\n" fn_name (List.length (PositiveSet.elements r_used_types));
+          PositiveSet.union acc r_used_types
+      | _ -> acc
+
+  ) PositiveSet.empty fn_defs
+
 
 let [@warning "-42"] gen_imports
     (sym_mapping: (string, string) Hashtbl.t)
@@ -822,6 +842,10 @@ let [@warning "-42"] gen_imports
     mod_name
 
   : ((string, StringSet.t) Hashtbl.t * _) =
+
+  let used_composites = get_used_tys_from_fns fn_defs |> PositiveSet.elements in
+  printf "\n USED COMPOSITES LENGTH IS: %d FOR MODULE %s\n" (List.length used_composites) mod_name;
+
   let imports_from_gbls_syms = List.fold_left
     (fun acc (elt: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) ->
        match elt with
@@ -829,8 +853,8 @@ let [@warning "-42"] gen_imports
        | _id, Gfun f -> (
            match f with
            | Internal rf -> (
-               get_fn_foreign_syms sym_mapping (PositiveSet.elements rf.fn_imports) acc
-             )
+             get_fn_foreign_syms sym_mapping (PositiveSet.elements rf.fn_imports) acc
+           )
            | External _ -> acc
        )
     )
@@ -856,22 +880,30 @@ let [@warning "-42"] gen_imports
     ) prog_types in
   let imports_from_composite = List.fold_left (
     fun (acc : (string, StringSet.t) Hashtbl.t) elt -> (
-        let r = match elt with | Composite(id, _,  _, _) -> extern_atom_r id in
+        let r = extern_atom_r elt in
+        printf "PRINTING IMPORT FOR COMPOSITE FOR SYMBOL %s" r;
         match Hashtbl.find_opt composite_mapping r with
         (* internal to module *)
-        | Some(None) -> acc
+        | Some(None) -> printf "\n%s IS INTERNAL TO MODULE\n" r; acc
         (* This can happen if the struct is anonymous ? *)
-        | None -> printf "NOT FOUND STRUCT %s" r; acc
+        | None -> printf "\nNOT FOUND STRUCT %s\n" r; acc
         (* might be external to module *)
         | Some (Some (mname, _)) -> (
-          if mname == mod_name then
-            acc
-          else
+          if mname = mod_name then (
+            printf "\n SYMBOL %s FOUND IN CURRENT MODULE %s\n" r mod_name; acc
+          )
+          else(
+            printf "\n SYMBOL %s NOT FOUND IN CURRENT MODULE %s found in %s instead\n" r mod_name mname;
             match Hashtbl.find_opt acc mname with
-            | Some hs -> Hashtbl.replace acc mname (StringSet.add r hs); acc
-            | None -> acc
+            | Some hs -> (printf "\n SYMBOL %s FOUND IN MODULE %s" r (List.hd (StringSet.elements hs));
+              Hashtbl.replace acc mname (StringSet.add r hs); acc)
+            | None ->
+              Hashtbl.replace acc mname (StringSet.singleton r); acc
+          )
+
+              (* printf "\n SYMBOL %s NOT FOUND IN MODULE" r; acc *)
       )
-  )) imports_from_gbls_syms prog_types in
+  )) imports_from_gbls_syms used_composites in
   (imports_from_composite, defined_in_module)
 
 let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) =
@@ -879,6 +911,7 @@ let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_i
         fprintf fmt "@[";
         let elts = StringSet.elements impts in
         let size = List.length elts in
+        (* TODO this line will have to be changed *)
         let crate = if module_ == "libc" then "" else "crate::" in
         (if size == 1 then
           let ele = List.hd elts in
@@ -942,11 +975,19 @@ let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_de
   List.iter (fun (k, v_opt) -> Hashtbl.add tbl k v_opt) elts;
   tbl
 
+let rec print_prog_types prog_types mod_name =
+  match prog_types with
+  | Composite(ty_ident, _, _, _) :: l' ->
+      printf "\nTHIS TYPE IS ty: %s for mod %s \n" (extern_atom_r ty_ident) mod_name ;
+      print_prog_types l' mod_name
+  | nil -> ()
+
+
 let print_if
   (clunky_sym_mapping: str_map_globals)
   (clunky_composite_mapping: str_map_composites)
   (clunky_mod_name: char list)
-  prog =
+  (prog: r_program) =
     let mod_name = List.to_seq clunky_mod_name |> String.of_seq in
     match !destination with
     | None -> printf "MISSING DEST FOR %s" mod_name
@@ -965,6 +1006,10 @@ let print_if
       printf "DOIN opening out: %s\n" f;
       let oc = open_out f in
       printf "DOING success opening out\n";
+      printf "PROG TYPES";
+      print_prog_types prog.prog_types mod_name;
+
+      printf "END PROG TYPES";
       print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog;
       close_out oc;
       change_directory "../..";

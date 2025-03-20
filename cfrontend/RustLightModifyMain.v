@@ -45,6 +45,7 @@ Definition gen_new_main
                 (S_sequence s1 s2)
                 (* TODO this is wrong *)
                 (PositiveSet.empty)
+                (PositiveSet.empty)
                 true
               ))))
   | _ => Error(msg "Unexpected type for main function")
@@ -58,7 +59,7 @@ Definition transl_program (r_prog : r_program) : res (r_program)
     List.find
     (fun x => AST.ident_eq (fst x) old_main_ident)
     (r_prog.(prog_defs)) in
-    do (new_prog_defs, new_main_ident) <-
+  do (new_prog_defs, new_main_ident) <-
     match old_main_fn with
     | Some(omf) => (
       (* TODO I'm surprised this works. Feels like it shouldn't, morally speaking *)

@@ -217,12 +217,15 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
     | Ctypes.Tvoid => NC_neither t1
     | _ => NC_first (i2etc t1 target_ty) target_ty
     end
-
   | ((Ctypes.Tpointer ty' _) as target_ty, Ctypes.Tpointer Ctypes.Tvoid _) =>
     match ty' with
     | Ctypes.Tvoid => NC_neither t1
     | _ => NC_second (i2etc t2 target_ty) target_ty
     end
+  (*| ((Ctypes.Tpointer _ _) as target_ty, _) =>*)
+  (*  NC_second (i2etc t2 target_ty) target_ty*)
+  (*| (_, (Ctypes.Tpointer _ _) as target_ty) =>*)
+  (*  NC_first (i2etc t1 target_ty) target_ty*)
   | (_, _) => NC_neither t1
   end.
 
@@ -490,6 +493,7 @@ Definition transl_internal_function (r_fn: r_function) : res r_function :=
     fn_temps := r_fn.(fn_temps);
     fn_body := new_body;
     fn_params := r_fn.(fn_params);
+    fn_ty_imports := r_fn.(fn_ty_imports);
     fn_imports := r_fn.(fn_imports);
     fn_is_safe := r_fn.(fn_is_safe);
   |}.

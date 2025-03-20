@@ -225,7 +225,12 @@ Record r_function : Type := mkrfunction {
   fn_body: rstatement;
   (* the external symbols that are used*)
   (* we use this in printing exports*)
+  (* this only includes global symbols, and does not include types *)
   fn_imports: PositiveSet.t;
+
+  (* the external symbols that are types and used *)
+  (* we use this in printing exports*)
+  fn_ty_imports: PositiveSet.t;
 
   (* TODO not used, get rid of it *)
   fn_is_safe: bool;
@@ -291,11 +296,9 @@ Definition empty_r_fn : r_function := {|
                                  fn_temps := nil;
                                  fn_body := S_skip;
                                  fn_imports := PositiveSet.empty;
+                                 fn_ty_imports := PositiveSet.empty;
                                  fn_is_safe := false;
                                |}.
-
-
-
 
 
 (* TODO not sure if I'm okay with the external function definition? The rust builtins may differ from C. *)
@@ -363,6 +366,7 @@ Fixpoint handle_exprs (in_scope_syms: PositiveSet.t ) (stmts: list rexpr) : Posi
         (handle_exprs in_scope_syms b)
   end.
 
+(* this is fine as an entry for global symbols. It's not like global symbols will appear outside this function *)
 Fixpoint walk_r_body_for_symbols
   (in_scope_syms: PositiveSet.t)
   (stmt: rstatement)
@@ -397,6 +401,7 @@ Fixpoint walk_r_body_for_symbols
       end
   (* TODO think about shadowing. Might need to ensure there's no other variable, but can easily do this with function metadata *)
   (* TODO this is possible in the case of a function pointer in which case we don't need to import anything. Should verify this to be the case, though *)
+  (* TODO this probably isn't right if the LHS ident isn't imported ... *)
   | S_call _ r_expr l_rexpr => PositiveSet.union (handle_exprs in_scope_syms l_rexpr) (walk_r_expr r_expr)
   | S_exit r_expr => walk_r_expr r_expr
   end
@@ -430,6 +435,130 @@ Print PositiveSet.
 Locate res.
 Print cons.
 
+Fixpoint get_ty_idents_from_ty (ty: type) : PositiveSet.t :=
+  match ty with
+  | Ctypes.Tvoid
+  | Ctypes.Tint _ _ _
+  | Ctypes.Tlong  _ _
+  | Ctypes.Tfloat  _ _ => PositiveSet.empty
+  | Tpointer ty' _ => get_ty_idents_from_ty ty'
+  | Tarray ty' _ _ => get_ty_idents_from_ty ty'
+  | Tstruct name _
+  | Tunion name _ => PositiveSet.singleton name
+  | Tfunction tl rty _ =>
+      PositiveSet.union (get_ty_idents_from_ty rty) (get_ty_idents_from_tl tl)
+  end
+  with get_ty_idents_from_tl (tl: typelist) : PositiveSet.t :=
+  match tl with
+  | Tnil => PositiveSet.empty
+  | Tcons ty tl' =>
+      PositiveSet.union (get_ty_idents_from_ty ty) (get_ty_idents_from_tl tl')
+  end
+.
+
+Fixpoint walk_r_expr_for_composite_types (expr: rexpr) : PositiveSet.t :=
+  match expr with
+    | Evar _ ty =>
+        get_ty_idents_from_ty ty
+    | Etempvar _ ty =>
+        get_ty_idents_from_ty ty
+    | Ederef exp ty =>
+        PositiveSet.union (walk_r_expr_for_composite_types exp) (get_ty_idents_from_ty ty)
+    | Eaddrof exp ty =>
+        PositiveSet.union (walk_r_expr_for_composite_types exp) (get_ty_idents_from_ty ty)
+    | Eunop _ exp ty =>
+        PositiveSet.union (walk_r_expr_for_composite_types exp) (get_ty_idents_from_ty ty)
+    | Ebinop _ exp1 exp2 ty =>
+        PositiveSet.union (walk_r_expr_for_composite_types exp2)
+        (PositiveSet.union (walk_r_expr_for_composite_types exp1) (get_ty_idents_from_ty ty))
+    | Ecast exp ty =>
+        PositiveSet.union (walk_r_expr_for_composite_types exp) (get_ty_idents_from_ty ty)
+    | Efield exp _id ty =>
+        PositiveSet.union (walk_r_expr_for_composite_types exp) (get_ty_idents_from_ty ty)
+    | Ealignof ty ty'
+    | Esizeof ty ty' => PositiveSet.union (get_ty_idents_from_ty ty) (get_ty_idents_from_ty ty')
+    | Enull_check e => walk_r_expr_for_composite_types e
+    | _ => PositiveSet.empty
+  end.
+
+Fixpoint walk_r_exprs_for_composite_types (exprs: list rexpr) : PositiveSet.t :=
+  match exprs with
+  | nil => PositiveSet.empty
+  | t :: l => PositiveSet.union (walk_r_expr_for_composite_types t) (walk_r_exprs_for_composite_types l)
+  end.
+
+
+Fixpoint walk_r_stmt_for_composite_types (stmt: rstatement) : PositiveSet.t :=
+  match stmt with
+  | S_skip => PositiveSet.empty
+  | S_assign rexpr_1 rexpr_2 =>
+      PositiveSet.union (walk_r_expr_for_composite_types rexpr_1) (walk_r_expr_for_composite_types rexpr_2)
+  | S_set id_1 rexpr =>
+      walk_r_expr_for_composite_types rexpr
+  | S_sequence s_1 s_2 =>
+      PositiveSet.union (walk_r_stmt_for_composite_types s_1) (walk_r_stmt_for_composite_types s_2)
+  | S_continue _ => PositiveSet.empty
+  | S_loop _ s_1 s_2 =>
+      PositiveSet.union (walk_r_stmt_for_composite_types s_1) (walk_r_stmt_for_composite_types s_2)
+  | S_loop2 _ _ s_1 s_2 =>
+      PositiveSet.union (walk_r_stmt_for_composite_types s_1) (walk_r_stmt_for_composite_types s_2)
+  | S_match_int rexpr ls =>
+      PositiveSet.union (walk_r_expr_for_composite_types rexpr) (walk_ls_for_composite_types ls)
+  | S_builtin _ _ _ _ => PositiveSet.empty
+  | S_if_then_else re s_1 s_2 =>
+      PositiveSet.union (PositiveSet.union (walk_r_stmt_for_composite_types s_1) (walk_r_stmt_for_composite_types s_2)) (walk_r_expr_for_composite_types re)
+  | S_break _int => PositiveSet.empty
+  | S_return maybe_rexpr =>
+      match maybe_rexpr with
+      | None => PositiveSet.empty
+      | Some (e, ty) => PositiveSet.union (walk_r_expr_for_composite_types e) (get_ty_idents_from_ty ty)
+      end
+  | S_call _ re l_rexpr =>
+      let ty_re := walk_r_expr_for_composite_types re in
+      let ty_args := walk_r_exprs_for_composite_types l_rexpr in
+      PositiveSet.union ty_re ty_args
+  | S_exit re => walk_r_expr_for_composite_types re
+  end
+with walk_ls_for_composite_types (ls: labeled_rstatements) : PositiveSet.t :=
+  match ls with
+  | LSnil stmt => walk_r_stmt_for_composite_types stmt
+  | LScons _ rs ls' =>
+      PositiveSet.union (walk_r_stmt_for_composite_types rs) (walk_ls_for_composite_types ls')
+  end.
+
+Fixpoint walk_r_fn_list_for_composite_types (args: list (ident * type)) : PositiveSet.t
+  :=
+  match args with
+  | nil => PositiveSet.empty
+  | (name, ty) :: args' =>
+      PositiveSet.union (get_ty_idents_from_ty ty) (walk_r_fn_list_for_composite_types args')
+  end.
+
+
+
+
+Definition walk_r_fn_for_composite_types
+  (ret_ty: type)
+  (params: list (ident * type))
+  (vars: list (ident * type))
+  (tmps: list (ident * type))
+  (body: rstatement)
+  : PositiveSet.t
+  :=
+
+  let r_set := get_ty_idents_from_ty ret_ty in
+
+  let arg_tys := walk_r_fn_list_for_composite_types params in
+
+  let var_types := walk_r_fn_list_for_composite_types vars in
+
+  let tmp_types := walk_r_fn_list_for_composite_types  tmps in
+
+  let body_tys := walk_r_stmt_for_composite_types body in
+
+  PositiveSet.union (PositiveSet.union (PositiveSet.union (PositiveSet.union r_set arg_tys) var_types) tmp_types) body_tys.
+
+(* TODO these comments are old and I should go through and prune what is not useful*)
 (* plan for initialization to 0 for structs *)
 (* statement for each primitive field initialized to 0 *)
 (* if is not a primitive, add a new variable, recursively add initialization to 0 *)

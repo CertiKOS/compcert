@@ -215,6 +215,7 @@ Definition transl_internal_function (r_fn: r_function) : res r_function :=
         fn_temps := tmp_vars;
         fn_body := split_r_body;
         fn_params := r_fn.(fn_params);
+        fn_ty_imports := r_fn.(fn_ty_imports);
         fn_imports := r_fn.(fn_imports);
         fn_is_safe := r_fn.(fn_is_safe);
       |})

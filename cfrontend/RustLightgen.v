@@ -462,18 +462,26 @@ Definition transl_internal_function_to_rustlight (c_fn: ClightCFG.function) (glo
           (acc : PositiveSet.t) (elt: ident) => PositiveSet.add elt acc)
           in_scope_symbols (PositiveSet.empty) in
 
+      let fn_temps := r_g.(SimplExpr.gen_trail) in
+      let fn_vars := c_fn.(ClightCFG.fn_vars) in
+      let fn_return := c_fn.(ClightCFG.fn_return) in
+      let fn_params := c_fn.(ClightCFG.fn_params) in
+
+      let import_types := walk_r_fn_for_composite_types fn_return fn_params fn_vars fn_temps r_body in
+
       Errors.OK(
       {|
-        fn_return := c_fn.(ClightCFG.fn_return);
+        fn_return := fn_return;
         (* TODO this should be easy but need to make a function*)
         fn_callconv := rcc;
-        fn_params := c_fn.(ClightCFG.fn_params);
+        fn_params := fn_params;
         fn_vars := c_fn.(ClightCFG.fn_vars);
-        fn_temps := r_g.(SimplExpr.gen_trail);
+        fn_temps := fn_temps;
         fn_body := r_body;
         (* TODO should be doing this in a separate step *)
         (* NOTE: it doesn't matter when we do this because we only add local variables*)
         fn_imports := (walk_r_body_for_symbols in_scope_symbols_tree r_body);
+        fn_ty_imports := import_types;
         fn_is_safe := false;
       |})
     | SimplExpr.Err msg  => Errors.Error(msg)
@@ -501,6 +509,7 @@ Definition get_glob_syms (cfg: clightcfg_program) : list ident :=
        | _ => false
        end)
      cfg.(Ctypes.prog_defs)).
+Print r_function.
 
 Definition transl_program (cfg: clightcfg_program) : res (r_program)
   :=
