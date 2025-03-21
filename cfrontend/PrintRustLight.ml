@@ -1,4 +1,5 @@
 [@@@ocaml.warning "-66"]
+[@@@ocaml.warning "-42"]
 open Format
 open! Ctypes
 open AST
@@ -9,6 +10,8 @@ exception Panic of string
 
 (* pulled from https://doc.rust-lang.org/book/appendix-01-keywords.html *)
 module StringSet = Set.Make(String)
+
+let libc_symbol_set = StringSet.of_list libc_list
 
 let rust_keywords  = StringSet.of_list [
   "as";
@@ -789,17 +792,32 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
        (* TODO this is the exact line where we can insert libc symbols. It would be good to know what those symbols are, though. *)
        (* for now, just auto libc it *)
        | None -> (
-           printf "UID couldn't find module for symbol %s in mapping. Assuming libc\n" name;
-           let maybe_hs = Hashtbl.find_opt acc "libc" in
-           match maybe_hs with
-           | None ->
-             let new_hs = StringSet.singleton name in
-             Hashtbl.replace acc "libc" new_hs;
-             acc
-           | Some hs ->
-             let new_hs = StringSet.add name hs in
-             Hashtbl.replace acc "libc" new_hs;
-             acc
+           if StringSet.mem name libc_symbol_set then (
+             printf "UID couldn't find module for symbol %s in mapping. Assuming libc\n" name;
+             let maybe_hs = Hashtbl.find_opt acc "libc" in
+             match maybe_hs with
+             | None ->
+               let new_hs = StringSet.singleton name in
+               Hashtbl.replace acc "libc" new_hs;
+               acc
+             | Some hs ->
+               let new_hs = StringSet.add name hs in
+               Hashtbl.replace acc "libc" new_hs;
+               acc
+
+            )
+           else (
+             let maybe_hs = Hashtbl.find_opt acc "external_symbols" in
+             match maybe_hs with
+             | None ->
+               let new_hs = StringSet.singleton name in
+               Hashtbl.replace acc "external_symbols" new_hs;
+               acc
+             | Some hs ->
+               let new_hs = StringSet.add name hs in
+               Hashtbl.replace acc "external_symbols" new_hs;
+               acc
+           )
          )
        | Some module_ ->
          let maybe_hs = Hashtbl.find_opt acc module_ in
@@ -908,23 +926,66 @@ let [@warning "-42"] gen_imports
 
 let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) =
   Hashtbl.iter (fun module_ impts ->
-        fprintf fmt "@[";
-        let elts = StringSet.elements impts in
-        let size = List.length elts in
-        (* TODO this line will have to be changed *)
-        let crate = if module_ == "libc" then "" else "crate::" in
-        (if size == 1 then
-          let ele = List.hd elts in
-          fprintf fmt "use %s%s::%s;" crate module_ ele
-        else (
-          fprintf fmt "use %s%s::{" crate module_;
-          List.iter (fun x -> fprintf fmt "%s, " x) elts;
-          fprintf fmt "};"
-        ));
-        fprintf fmt "@]@;"
-      ) import_map;
+    if module_ = "external_symbols" then
+      (* do nothing here, we'll print afterwards *)
+      ()
+    else (
+      printf "\n\nDOING EXPORTS FOR %s\n\n" module_;
+      fprintf fmt "@[";
+      let elts = StringSet.elements impts in
+      let size = List.length elts in
+      (* TODO this line will have to be changed *)
+      let crate = if module_ = "libc" then "" else "crate::" in
+      (if size == 1 then
+        let ele = List.hd elts in
+        fprintf fmt "use %s%s::%s;" crate module_ ele
+      else (
+        fprintf fmt "use %s%s::{" crate module_;
+        List.iter (fun x -> fprintf fmt "%s, " x) elts;
+        fprintf fmt "};"
+      ));
+      fprintf fmt "@]@;"
+    )) import_map;
   fprintf fmt "@;"
 
+let print_externs fmt
+  (extern_imports: StringSet.t)
+  (sigs: (string, RustLight.r_function Ctypes.fundef) Hashtbl.t)
+  =
+    fprintf fmt "extern \"C\" {@ @[<v 2>@;";
+    List.iter (fun elt ->
+      match Hashtbl.find_opt sigs elt with
+      | Some(External(ef, tl, rty, _)) -> (
+        match ef with
+        | EF_external(name, _)
+        | EF_builtin(name, _)
+        | EF_runtime(name, _) ->
+            fprintf fmt "fn %s(" (List.to_seq name |> String.of_seq);
+            List.iter (fun ty ->
+              fprintf fmt "_: %s," (gen_ty_rust false ty)
+            ) (map_tylist_to_list tl);
+            fprintf fmt ") -> %s;@;" (gen_ty_rust false rty)
+        | _ -> printf("\nERROR unsupported external fn type \n")
+      )
+      | Some(Internal(_)) -> printf("\n ERROR: external linkage for internal function??\n")
+      | None -> printf("\n ERROR: could not find function to link against in external function list?? Can't get signature, so bailing\n")
+    ) (StringSet.elements extern_imports);
+    fprintf fmt "@;<0 -2>}@]@;@;"
+
+let make_syms_usable (syms: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list)) =
+  List.fold_left (fun acc (ele: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) ->
+    match ele with
+    | (_id, Gfun(External(ef, _, _, _) as ext_fn)) -> (
+        match ef with
+        | EF_external(name, _)
+        | EF_builtin(name, _)
+        | EF_runtime(name, _) -> Hashtbl.add acc (name |> List.to_seq |> String.of_seq) ext_fn; acc
+        | _ -> acc)
+    | _ -> acc
+  )
+  (Hashtbl.create 7) syms
+
+(* TODO this is a bit of a hack. Should probably be handled in the semantics of rustlight *)
 let print_program (sym_mapping: (string, string) Hashtbl.t)
     composite_mapping mod_name f (prog: RustLight.r_program) =
   let [@warning "-42"] p_defs = prog.prog_defs in
@@ -937,6 +998,12 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
   (* do printing  *)
 
   print_imports f imports composite_mapping;
+
+  (match Hashtbl.find_opt imports "external_symbols" with
+  | Some external_symbols -> (
+    print_externs f external_symbols (prog.prog_defs |> make_syms_usable)
+  )
+  | None -> ());
 
   List.iter
     (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name
