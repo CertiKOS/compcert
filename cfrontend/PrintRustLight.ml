@@ -8,6 +8,10 @@ open RustLight
 open! LibcSymbols
 exception Panic of string
 
+let remove_c_extension path =
+  let base = Filename.basename path in
+  base
+
 (* pulled from https://doc.rust-lang.org/book/appendix-01-keywords.html *)
 module StringSet = Set.Make(String)
 
@@ -352,6 +356,7 @@ let string_of_init fmt id (expected_length: int option) =
         if Char.code '\000' == c then Buffer.add_string b "\\0"
         else if Char.code '\n' == c then Buffer.add_string b "\\n"
         else if Char.code '\t' == c then Buffer.add_string b "\\t"
+        else if Char.code '\"' == c then Buffer.add_string b "\\\""
         else Buffer.add_string b (Printf.sprintf "\\%03o" c)
   | _ ->
       assert false
@@ -671,7 +676,7 @@ let rec print_stmt fmt body =
         print_expr ecode
     )
   | S_call(None, name, arg_list) -> (
-      fprintf fmt "@[<hv 2>%a@,(@[<hov 0>%a@]);@]"
+      fprintf fmt "@[<hv 2>%a(@[<hov 0>%a@]);@]"
         print_expr name
         print_arglist arg_list
     )
@@ -840,6 +845,7 @@ let [@warning "-42"] get_used_tys_from_fns
       match elt with
       (* TODO should probably pull in the types from this too but this requires rustlight changes*)
       | (_id, Gvar v) -> acc
+
       | (id, Gfun Internal rf) ->
           let fn_name = extern_atom_r id in
           let r_used_types = rf.fn_ty_imports in
@@ -938,9 +944,9 @@ let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_i
       let crate = if module_ = "libc" then "" else "crate::" in
       (if size == 1 then
         let ele = List.hd elts in
-        fprintf fmt "use %s%s::%s;" crate module_ ele
+        fprintf fmt "use %s%s::%s;" crate (remove_c_extension module_) ele
       else (
-        fprintf fmt "use %s%s::{" crate module_;
+        fprintf fmt "use %s%s::{" crate (remove_c_extension module_);
         List.iter (fun x -> fprintf fmt "%s, " x) elts;
         fprintf fmt "};"
       ));
@@ -1033,7 +1039,7 @@ let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_de
     let v_opt = match opt_v with
       | None -> None
       | Some (v_list, dfn) ->
-        let v_str = String.of_seq (List.to_seq v_list) in
+        let v_str = String.of_seq (List.to_seq v_list) |> remove_c_extension in
         Some (v_str, dfn)
     in
     (k_str, v_opt)

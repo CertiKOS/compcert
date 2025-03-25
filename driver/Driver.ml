@@ -19,6 +19,11 @@ open Driveraux
 open Frontend
 open Assembler
 open Linker
+
+let remove_c_extension path =
+  let base = Filename.basename path in
+  Filename.chop_extension base
+
 (* open Graph *)
 (* open Camlcoq *)
 
@@ -111,8 +116,7 @@ let compile_c_file sourcename ifile ofile =
   (* Parse the ast *)
   let csyntax = parse_c_file sourcename ifile in
 
-  let module_name =
-    String.sub sourcename 0 ((String.length sourcename) - 2) |> String.to_seq |> List.of_seq in
+  let module_name = remove_c_extension sourcename |> String.to_seq |> List.of_seq in
 
   (* match *)
   (*   (Compiler.print_r_program !sym_mapping !composite_mapping module_name csyntax) *)
@@ -611,19 +615,11 @@ in
   output_string oc content;      (* Write the string to the file *)
   close_out oc
 
-let strip_dot_slash s =
-  let prefix = "./" in
-  if String.length s >= 2 && String.sub s 0 2 = prefix then
-    String.sub s 2 (String.length s - 2)
-  else
-    s
-
-
 let create_lib unit =
   let content = List.fold_left
       (fun result file ->
-         let module_name = String.sub file 0 ((String.length file) - 2) |> strip_dot_slash in
-         result^"\npub mod "^module_name^";\n") "" !list_c_files in
+         let module_name = remove_c_extension file in
+         result^"\npub mod "^module_name^";\n") "#![feature(extern_types)]\n\n" !list_c_files in
   let oc = open_out "lib.rs" in
   output_string oc content;
   close_out oc

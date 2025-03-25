@@ -5739,7 +5739,7 @@ let libc_list = [
   "fchmodat";
   "fchown";
   "fchownat";
-  "fclose";
+  (* "fclose"; *)
   "fcntl";
   "fdatasync";
   "fdopen";
@@ -5761,15 +5761,15 @@ let libc_list = [
   "flock";
   "fmemopen";
   "fnmatch";
-  "fopen";
+  (* "fopen"; *)
   "fopen64";
   "fork";
   "forkpty";
   "fpathconf";
   "fprintf";
-  "fputc";
+  (* "fputc"; *)
   "fputs";
-  "fread";
+  (* "fread"; *)
   "fread_unlocked";
   "free";
   "freeaddrinfo";
@@ -5779,7 +5779,7 @@ let libc_list = [
   "freopen";
   "freopen64";
   "fscanf";
-  "fseek";
+  (* "fseek"; *)
   "fseeko";
   "fseeko64";
   "fsetpos";
@@ -5794,7 +5794,7 @@ let libc_list = [
   "fstatvfs";
   "fstatvfs64";
   "fsync";
-  "ftell";
+  (* "ftell"; *)
   "ftello";
   "ftello64";
   "ftok";
@@ -5802,7 +5802,7 @@ let libc_list = [
   "ftruncate64";
   "futimens";
   "futimes";
-  "fwrite";
+  (* "fwrite"; *)
   "gai_strerror";
   "getaddrinfo";
   "getauxval";
@@ -6348,7 +6348,7 @@ let libc_list = [
   "strcoll";
   "strcpy";
   "strcspn";
-  "strdup";
+  (* "strdup"; *)
   "strerror";
   "strerror_r";
   "strftime";
@@ -6400,7 +6400,7 @@ let libc_list = [
   "tcsetpgrp";
   "tee";
   "telldir";
-  "time";
+  (* "time"; *)
   "timegm";
   "timer_create";
   "timer_delete";

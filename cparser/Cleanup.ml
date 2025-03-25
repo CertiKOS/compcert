@@ -202,9 +202,9 @@ let rec simpl_globdecls accu = function
         match g.gdesc with
         | Gdecl((sto, id, ty, init) as decl) -> visible_decl decl || needed id
         | Gfundef f -> visible_fundef f || needed f.fd_name
-        | Gcompositedecl(_, id, _) -> true
-        | Gcompositedef(_, id, _, flds) -> true
-        | Gtypedef(id, ty) -> true
+        | Gcompositedecl(_, id, _) -> needed id
+        | Gcompositedef(_, id, _, flds) -> needed id
+        | Gtypedef(id, ty) -> needed id
         | Genumdef(id, _, enu) ->
             needed id || List.exists (fun (id, _, _) -> needed id) enu
         | Gpragma s -> true in
