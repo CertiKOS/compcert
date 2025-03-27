@@ -1062,7 +1062,9 @@ let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (co
       let elts = StringSet.elements impts in
       let size = List.length elts in
       (* TODO this line will have to be changed *)
-      let crate = if module_ = "libc" then "" else "crate::" in
+      let crate =
+        if module_ = "libc" then "" else
+          if mod_name = "main" then "rust_project::" else "crate::" in
       (if size == 1 then
         let ele = List.hd elts in
         fprintf fmt "use %s%s::%s;" crate (remove_c_extension module_) ele
@@ -1088,12 +1090,12 @@ let print_extern_types
 
 let print_externs fmt
   (extern_imports: StringSet.t)
-  (sigs: (string, RustLight.r_function Ctypes.fundef) Hashtbl.t)
+  (sigs: (string, (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef ) Hashtbl.t)
   =
     fprintf fmt "extern \"C\" {@ @[<v 2>@;";
     List.iter (fun elt ->
       match Hashtbl.find_opt sigs elt with
-      | Some(External(ef, tl, rty, _)) -> (
+      | Some(Gfun(External(ef, tl, rty, _))) -> (
         match ef with
         | EF_external(name, s)
         | EF_builtin(name, s)
@@ -1106,7 +1108,9 @@ let print_externs fmt
             fprintf fmt ") -> %s;@;" (gen_ty_rust false rty)
         | _ -> printf "\nERROR unsupported external fn type \n"
       )
-      | Some(Internal(_)) -> printf "\n ERROR: external linkage for internal function??\n"
+      | Some(Gfun(Internal(_))) -> printf "\n ERROR: external linkage for internal function??\n"
+      | Some(Gvar(gv)) ->
+          fprintf fmt "static mut %s: %s;@;" elt (gen_ty_rust false gv.gvar_info)
       | None -> printf "\n ERROR: could not find function to link against in external function list for symbol %s?? Can't get signature, so bailing\n" elt
     ) (StringSet.elements extern_imports);
     fprintf fmt "@;<0 -2>}@]@;@;"
@@ -1114,12 +1118,16 @@ let print_externs fmt
 let make_syms_usable (syms: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list)) =
   List.fold_left (fun acc (ele: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) ->
     match ele with
-    | (_id, Gfun(External(ef, _, _, _) as ext_fn)) -> (
+    | (_id, (Gfun(External(ef, _, _, _)) as ext_fn)) -> (
         match ef with
         | EF_external(name, _)
         | EF_builtin(name, _)
         | EF_runtime(name, _) -> Hashtbl.add acc (name |> List.to_seq |> String.of_seq) ext_fn; acc
         | _ -> acc)
+    | (id, (Gvar(gv) as glo)) -> (
+      (if (List.length gv.gvar_init) = 0 then Hashtbl.add acc (extern_atom_r id)  glo);
+      acc
+    )
     | _ -> acc
   )
   (Hashtbl.create 7) syms

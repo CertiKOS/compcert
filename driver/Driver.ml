@@ -615,7 +615,7 @@ let create_lib unit =
   let content = List.fold_left
       (fun result file ->
          let module_name = remove_c_extension file in
-         result^"\npub mod "^module_name^";\n") "#![feature(extern_types)]\n\n" !list_c_files in
+         if module_name <> "main" then result^"\npub mod "^module_name^";\n" else result) "#![feature(extern_types)]\n\n" !list_c_files in
   let oc = open_out "lib.rs" in
   output_string oc content;
   close_out oc

@@ -5748,12 +5748,12 @@ let libc_list = [
   "ferror";
   "fexecve";
   "fflush";
-  "fgetc";
+  (* "fgetc"; *)
   "fgetgrent_r";
   "fgetpos";
   "fgetpos64";
   "fgetpwent_r";
-  "fgets";
+  (* "fgets"; *)
   "fgetspent_r";
   "fgetxattr";
   "fileno";
@@ -5766,7 +5766,7 @@ let libc_list = [
   "fork";
   "forkpty";
   "fpathconf";
-  "fprintf";
+  (* "fprintf"; *)
   (* "fputc"; *)
   "fputs";
   (* "fread"; *)
