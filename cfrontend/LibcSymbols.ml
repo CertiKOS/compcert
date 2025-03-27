@@ -5647,7 +5647,7 @@ let libc_list = [
   "atof";
   "atoi";
   "atol";
-  "atoll";
+  (* "atoll"; *)
   "backtrace";
   "bind";
   "brk";
@@ -6028,13 +6028,13 @@ let libc_list = [
   "openpty";
   "pathconf";
   "pause";
-  "pclose";
+  (* "pclose"; *)
   "perror";
   "personality";
   "pipe";
   "pipe2";
   "poll";
-  "popen";
+  (* "popen"; *)
   "posix_basename";
   "posix_fadvise";
   "posix_fadvise64";

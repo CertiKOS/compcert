@@ -417,9 +417,7 @@ let generate_mapping unit =
        let glob_list = extract_globals file_name in
        (match glob_list with
         | Errors.OK l -> (List.iter
-                           (fun symbol ->
-                              sym_mapping := StrMap.add symbol module_name !sym_mapping;) (fst l)
-                          ;
+                           (fun symbol -> sym_mapping := StrMap.add symbol module_name !sym_mapping;) (fst l) ;
                           List.iter (fun (sym, dfn) -> (
                               match StrMap.find sym !composite_mapping with
                               (* first occurence *)
@@ -427,14 +425,12 @@ let generate_mapping unit =
                                 (
                                   composite_mapping := StrMap.add sym (Some((module_name, dfn))) !composite_mapping;
                                 )
-                              (* set to none explicitly, do nothing *)
+                              (* HACK this is morally wrong. Instead: switch this out to a list of (name, module).
+                                 that way, we'll know (from prog_types) which one to use
+                               *)
                               | Some (None) -> printf "UUID explicitly setting to NONE\n"; ()
                               | Some (Some (f, dfn_old)) -> (
-                                  (* let (sou, mems, attrs) = match dfn with | Ctypes.Composite(_,a,b,c) -> (a, b, c) in *)
-                                  (* let (sou_o, mems_o, attrs_o) = match dfn_old with | Ctypes.Composite(_,a,b,c) -> (a, b, c) in *)
                                   if not (comp_eq dfn dfn_old) then
-                                    (* printf "sou is struct: %b, sou_o is struct %b" (sou == Ctypes.Struct) (sou_o == Ctypes.Union); *)
-                                    (* printf "UUID inequal for %s with %b %b %b, replacing!\n" sym (sou = sou_o) (mems = mems_o) (attrs = attrs_o) ; *)
                                     composite_mapping := (StrMap.add sym None !composite_mapping);
                               )
                           )) (snd l))

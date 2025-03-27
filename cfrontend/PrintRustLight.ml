@@ -8,6 +8,14 @@ open RustLight
 open! LibcSymbols
 exception Panic of string
 
+let ty (t: signature) = ()
+
+let todo () = failwith "\nTODO\n"
+let unimplemented () = failwith "Not yet implemented"
+
+
+(* TODO a lot of the clunky tuples could be replaced with modules *)
+
 let remove_c_extension path =
   let base = Filename.basename path in
   base
@@ -191,7 +199,7 @@ let name_floattype_rust sz =
 
 let name_longtype_rust sz =
   match sz with
-  | Signed -> "libc::size_t"
+  | Signed -> "libc::ssize_t"
   | Unsigned -> "libc::size_t"
 
 let rec map_tylist_to_list tylist =
@@ -786,17 +794,24 @@ let define_composite fmt (Composite(id, su, m, a)) =
   fprintf fmt "@;<0 -2>}@]@; @;"
 
 
-let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
+(* TODO ways to clean this up: *)
+(* insertion is repeated code and there's probably a better way to do that *)
+(* external_symbols key should be returned as something else. That's a hack *)
+let get_fn_foreign_syms
+  mapping (* global symbol -> module *)
+  list_of_ids (* idents that might be global symbols *)
+  cur_sym_map (* module name -> {imports from that module}  *) (* what we're filling out for the used symbols *)
+  =
   printf "UID list of ids %d\n" (List.length list_of_ids);
   List.fold_left
     (fun acc id ->
        let name = extern_atom_r id in
-       let _ = printf "USED NAME %s" name in
+       (* let _ = printf "USED NAME %s" name in *)
        let maybe_module = Hashtbl.find_opt mapping name in
        match maybe_module with
-       (* TODO this is the exact line where we can insert libc symbols. It would be good to know what those symbols are, though. *)
-       (* for now, just auto libc it *)
+       (* we don't know what this symbol is. It's not defined in the project *)
        | None -> (
+           (* it's a libc symbol, so we can import from libc *)
            if StringSet.mem name libc_symbol_set then (
              printf "UID couldn't find module for symbol %s in mapping. Assuming libc\n" name;
              let maybe_hs = Hashtbl.find_opt acc "libc" in
@@ -809,8 +824,8 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
                let new_hs = StringSet.add name hs in
                Hashtbl.replace acc "libc" new_hs;
                acc
-
             )
+           (* it's not a libc symbol, so we have to extern "C" it and have the linker find i: *)
            else (
              let maybe_hs = Hashtbl.find_opt acc "external_symbols" in
              match maybe_hs with
@@ -838,7 +853,8 @@ let get_fn_foreign_syms mapping list_of_ids cur_sym_map =
     )
     cur_sym_map list_of_ids
 
-let [@warning "-42"] get_used_tys_from_fns
+(*get a list of composite types used by the c module *)
+let [@warning "-42"] get_used_tys_in_prog
     (fn_defs: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list)) =
   List.fold_left (
     fun acc (elt: AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) ->
@@ -855,21 +871,111 @@ let [@warning "-42"] get_used_tys_from_fns
 
   ) PositiveSet.empty fn_defs
 
+let rec extract_tys_from_ty ty =
+  match ty with
+  | Tstruct(id, _)
+  | Tunion(id, _) -> printf "extracted %s" (extern_atom_r id); [id]
+  | Tarray(ty, _, _)
+  | Tpointer(ty, _) -> extract_tys_from_ty ty
+  | Tfunction(tl, ty, _) ->
+      extract_tys_from_ty ty @ extract_tys_from_tl tl
+  | _ -> []
+and extract_tys_from_tl tl =
+  match tl with
+  | Tnil -> []
+  | Tcons(ty, tl') -> (extract_tys_from_ty ty) @ (extract_tys_from_tl tl')
+
+
+let get_contained_typ_idents (Ctypes.Composite(id, sou, members, _))
+=
+  List.fold_left (
+    fun acc ele ->
+      match ele with
+      | Member_plain(_id, ty) -> printf "\n CONSIDERING MEMBER %s\n" (extern_atom_r _id); extract_tys_from_ty ty @ acc
+      | Member_bitfield(_, _, _, _, _, _) -> unimplemented()
+  ) [] members
+
+(* args match gen_imports outputs *)
+let rec recursively_gen_composite_defns_and_imports
+  (composite_mapping: (string, (string * Ctypes.composite_definition) option) Hashtbl.t)
+  (stack : ident list)
+  (* (types found in a project local module, opaque types, types defined in module) *)
+  ((seen_idents, glbl_imports, extern_typs, in_module_composite_defns): StringSet.t * (string, StringSet.t) Hashtbl.t * StringSet.t * (ident, composite_definition) Hashtbl.t)
+  : (StringSet.t * (string, StringSet.t) Hashtbl.t * StringSet.t * (ident, composite_definition) Hashtbl.t)
+=
+  match stack with
+  | [] ->
+      (seen_idents, glbl_imports, extern_typs, in_module_composite_defns)
+  | e :: stack' ->
+      let name = extern_atom_r e in
+      let seen_idents_updated = StringSet.add name seen_idents in
+      let dflt_value = (stack', (seen_idents_updated, glbl_imports, extern_typs, in_module_composite_defns)) in
+      let (stack'', acc) =
+        if StringSet.mem name seen_idents then
+          dflt_value
+        else (
+          printf "\n CONSIDERING %s\n" name;
+          match Hashtbl.find_opt composite_mapping name with
+            | Some(Some(mod_name, (Ctypes.Composite(id, _, _, _) as cdef))) ->
+                printf "\n %s in GLBLS\n" name;
+                if Hashtbl.mem in_module_composite_defns id then
+                  let contained_typs = get_contained_typ_idents cdef in
+                  printf "\n %s in MODULE\n" name;
+                  (stack' @ contained_typs, (seen_idents_updated, glbl_imports, extern_typs, in_module_composite_defns))
+                else
+                  (match Hashtbl.find_opt glbl_imports mod_name with
+                   | None ->
+                       Hashtbl.add glbl_imports mod_name (StringSet.singleton name);
+                       dflt_value
+                   | Some(ss) ->
+                       Hashtbl.replace glbl_imports mod_name (StringSet.add name ss);
+                       dflt_value
+                  )
+            (* multiple occurrences defined: do nothing because it's module local defined *)
+            | Some(None) ->
+                printf "\n ENCOUNTERED MULTI DEFNS for %s?! not good\n" name;
+                dflt_value
+            | None ->
+                (* don't know about the symbol, not found in the globally defined symbols. *)
+                if not (StringSet.mem name extern_typs) then
+                  match Hashtbl.find_opt in_module_composite_defns e with
+                  | Some(cdef) ->
+                    if not (StringSet.mem name seen_idents) then
+                      let contained_types : ident list  = get_contained_typ_idents cdef in
+                      (stack' @ contained_types, (seen_idents_updated, glbl_imports, extern_typs, in_module_composite_defns))
+                    else dflt_value
+                  (* also not found in the locally defined symbols. *)
+                  | None ->
+                    let extern_typs_new = StringSet.add name extern_typs in
+                    (stack', (seen_idents_updated, glbl_imports, extern_typs_new, in_module_composite_defns))
+                    (* might be a locally defined struct or something but contains a lot of types *)
+                else dflt_value)
+      in recursively_gen_composite_defns_and_imports composite_mapping stack'' acc
+
+
+
+
+
+      (* (glbl_imports, extern_typs, in_module_composite_defns) *)
 
 let [@warning "-42"] gen_imports
+    (* mapping (across all modules) from global symbol (either function or variable) to the module it is defined in *)
     (sym_mapping: (string, string) Hashtbl.t)
 
+    (* list of name * fundef in the program *)
+    (* TODO rename from fn_defs to fundefs because that's confusing. They're not all functions *)
     (fn_defs: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list))
-
-    composite_mapping
+    (* mapping of known structs in the program (across all modules )*)
+    (composite_mapping: (string, (string * Ctypes.composite_definition) option) Hashtbl.t)
     prog_types
     mod_name
+  : ((string, StringSet.t) Hashtbl.t * StringSet.t * _) =
 
-  : ((string, StringSet.t) Hashtbl.t * _) =
-
-  let used_composites = get_used_tys_from_fns fn_defs |> PositiveSet.elements in
+  (* this is the list of composite types that were used by functions *)
+  let used_composites = get_used_tys_in_prog fn_defs |> PositiveSet.elements in
   printf "\n USED COMPOSITES LENGTH IS: %d FOR MODULE %s\n" (List.length used_composites) mod_name;
 
+  (* this returns the list of variables and functions (but NOT types) that are not module local *)
   let imports_from_gbls_syms = List.fold_left
     (fun acc (elt: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) ->
        match elt with
@@ -879,10 +985,12 @@ let [@warning "-42"] gen_imports
            | Internal rf -> (
              get_fn_foreign_syms sym_mapping (PositiveSet.elements rf.fn_imports) acc
            )
+           (* TODO we may need to handle this case? *)
            | External _ -> acc
        )
     )
     (Hashtbl.create 7) fn_defs in
+  (* note: do not have to be used to be defined. *)
   let defined_in_module  =
     List.filter (
       fun dfn ->
@@ -890,7 +998,10 @@ let [@warning "-42"] gen_imports
         match Hashtbl.find_opt composite_mapping r with
         (* This can happen if the struct is anonymous. *)
         (* | None -> printf "UUID: NOT FOUND STRUCT %s" r; false *)
-        | None -> printf "ANON struct %s" r; true
+        | None -> (
+          (* TODO this is wrong. Should mark as anonymous in hashtbl *)
+          printf "ANON struct %s" r; true
+        )
         (* might be external to module *)
         | Some (Some (mname, _)) ->
           printf "\nUUID: mod name %s, %s len modname: %d, nmame %d, eq %b\n"
@@ -902,37 +1013,44 @@ let [@warning "-42"] gen_imports
         (* internal to module *)
         | Some (None) -> true
     ) prog_types in
-  let imports_from_composite = List.fold_left (
-    fun (acc : (string, StringSet.t) Hashtbl.t) elt -> (
-        let r = extern_atom_r elt in
-        printf "PRINTING IMPORT FOR COMPOSITE FOR SYMBOL %s" r;
-        match Hashtbl.find_opt composite_mapping r with
-        (* internal to module *)
-        | Some(None) -> printf "\n%s IS INTERNAL TO MODULE\n" r; acc
-        (* This can happen if the struct is anonymous ? *)
-        | None -> printf "\nNOT FOUND STRUCT %s\n" r; acc
-        (* might be external to module *)
-        | Some (Some (mname, _)) -> (
-          if mname = mod_name then (
-            printf "\n SYMBOL %s FOUND IN CURRENT MODULE %s\n" r mod_name; acc
-          )
-          else(
-            printf "\n SYMBOL %s NOT FOUND IN CURRENT MODULE %s found in %s instead\n" r mod_name mname;
-            match Hashtbl.find_opt acc mname with
-            | Some hs -> (printf "\n SYMBOL %s FOUND IN MODULE %s" r (List.hd (StringSet.elements hs));
-              Hashtbl.replace acc mname (StringSet.add r hs); acc)
-            | None ->
-              Hashtbl.replace acc mname (StringSet.singleton r); acc
-          )
+  let defined_in_module_idents = List.map (fun (Composite(id, _, _, _)) -> id ) defined_in_module in
+  let stack = used_composites @ defined_in_module_idents in
+  let defined_in_module_ht = List.fold_left (fun acc (Composite(id, _, _, _) as c) -> Hashtbl.add acc id c; acc) (Hashtbl.create 7) defined_in_module in
 
-              (* printf "\n SYMBOL %s NOT FOUND IN MODULE" r; acc *)
-      )
-  )) imports_from_gbls_syms used_composites in
-  (imports_from_composite, defined_in_module)
+  let (_seen_idents, glbl_imports, extern_typs, in_module_composite_defns) = recursively_gen_composite_defns_and_imports composite_mapping stack (StringSet.empty, imports_from_gbls_syms, StringSet.empty, defined_in_module_ht) in
+  (glbl_imports, extern_typs, in_module_composite_defns)
 
-let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) =
+  (* let (imports_from_composite, extern_typs) = List.fold_left ( *)
+  (*   fun ((acc, extern_typs) : ((string, StringSet.t) Hashtbl.t) * StringSet.t) elt -> ( *)
+  (*       let r = extern_atom_r elt in *)
+  (*       printf "PRINTING IMPORT FOR COMPOSITE FOR SYMBOL %s" r; *)
+  (*       match Hashtbl.find_opt composite_mapping r with *)
+  (*       (* internal to module *) *)
+  (*       | Some(None) -> printf "\n%s IS INTERNAL TO MODULE\n" r; (acc, extern_typs) *)
+  (*       (* This can happen if the struct is anonymous ? *) *)
+  (*       | None -> printf "\nNOT FOUND STRUCT %s\n" r; *)
+  (*         (acc, StringSet.union extern_typs (StringSet.singleton r)) *)
+  (*       (* might be external to module *) *)
+  (*       | Some (Some (mname, _)) -> ( *)
+  (*         let mname' = remove_c_extension mname in *)
+  (*         if mname' = mod_name then ( *)
+  (*           printf "\n SYMBOL %s FOUND IN CURRENT MODULE %s\n" r mod_name; (acc, extern_typs) *)
+  (*         ) *)
+  (*         else( *)
+  (*           printf "\n SYMBOL %s NOT FOUND IN CURRENT MODULE %s found in %s instead\n" r mod_name mname'; *)
+  (*           match Hashtbl.find_opt acc mname' with *)
+  (*           | Some hs -> (printf "\n SYMBOL %s FOUND IN MODULE %s" r (List.hd (StringSet.elements hs)); *)
+  (*             Hashtbl.replace acc mname' (StringSet.add r hs); (acc, extern_typs)) *)
+  (*           | None -> *)
+  (*             Hashtbl.replace acc mname' (StringSet.singleton r); (acc, extern_typs) *)
+  (*         ) *)
+  (*     ) *)
+  (* )) (imports_from_gbls_syms, StringSet.empty, defined_in_module) (used_composites @ defined_in_module_idents) in *)
+  (* (imports_from_composite, extern_typs, defined_in_module) *)
+
+let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) =
   Hashtbl.iter (fun module_ impts ->
-    if module_ = "external_symbols" then
+    if module_ = "external_symbols" || module_ = mod_name then
       (* do nothing here, we'll print afterwards *)
       ()
     else (
@@ -954,6 +1072,17 @@ let print_imports fmt (import_map: (string, StringSet.t) Hashtbl.t) (composite_i
     )) import_map;
   fprintf fmt "@;"
 
+let print_extern_types
+  fmt
+  (extern_types: StringSet.t)
+  =
+    fprintf fmt "extern \"C\" {@ @[<v 2>@;";
+    List.iter
+    (fun name ->
+      fprintf fmt "pub type %s;" name
+    ) (StringSet.elements extern_types);
+    fprintf fmt "@;<0 -2>}@]@;@;"
+
 let print_externs fmt
   (extern_imports: StringSet.t)
   (sigs: (string, RustLight.r_function Ctypes.fundef) Hashtbl.t)
@@ -963,18 +1092,19 @@ let print_externs fmt
       match Hashtbl.find_opt sigs elt with
       | Some(External(ef, tl, rty, _)) -> (
         match ef with
-        | EF_external(name, _)
-        | EF_builtin(name, _)
-        | EF_runtime(name, _) ->
+        | EF_external(name, s)
+        | EF_builtin(name, s)
+        | EF_runtime(name, s) ->
             fprintf fmt "fn %s(" (List.to_seq name |> String.of_seq);
             List.iter (fun ty ->
               fprintf fmt "_: %s," (gen_ty_rust false ty)
             ) (map_tylist_to_list tl);
+            if s.sig_cc.cc_vararg <> None then fprintf fmt " _:...";
             fprintf fmt ") -> %s;@;" (gen_ty_rust false rty)
-        | _ -> printf("\nERROR unsupported external fn type \n")
+        | _ -> printf "\nERROR unsupported external fn type \n"
       )
-      | Some(Internal(_)) -> printf("\n ERROR: external linkage for internal function??\n")
-      | None -> printf("\n ERROR: could not find function to link against in external function list?? Can't get signature, so bailing\n")
+      | Some(Internal(_)) -> printf "\n ERROR: external linkage for internal function??\n"
+      | None -> printf "\n ERROR: could not find function to link against in external function list for symbol %s?? Can't get signature, so bailing\n" elt
     ) (StringSet.elements extern_imports);
     fprintf fmt "@;<0 -2>}@]@;@;"
 
@@ -997,26 +1127,29 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
   let [@warning "-42"] p_defs = prog.prog_defs in
   let [@warning "-42"] p_types = prog.prog_types in
 
-  let (imports, in_module_composite_dfns) = gen_imports sym_mapping p_defs composite_mapping p_types mod_name in
+  let (imports, extern_typs, in_module_composite_dfns) = gen_imports sym_mapping p_defs composite_mapping p_types mod_name in
 
   fprintf f "@[<v 0>";
 
   (* do printing  *)
 
-  print_imports f imports composite_mapping;
+  print_imports f mod_name imports composite_mapping;
 
   (match Hashtbl.find_opt imports "external_symbols" with
   | Some external_symbols -> (
-    print_externs f external_symbols (prog.prog_defs |> make_syms_usable)
+    print_externs f external_symbols (prog.prog_defs |> make_syms_usable);
+    print_extern_types f extern_typs
+
   )
   | None -> ());
 
+  let in_module_composite_defns_list = in_module_composite_dfns |> Hashtbl.to_seq |> List.of_seq |> List.map snd in
+
   List.iter
     (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name
-                (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id))
-    in_module_composite_dfns;
+                (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_defns_list;
 
-  List.iter (define_composite f) in_module_composite_dfns;
+  List.iter (define_composite f) in_module_composite_defns_list;
   List.iter (print_globdef f p_types) p_defs;
   fprintf f "@]@."
 

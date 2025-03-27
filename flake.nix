@@ -46,6 +46,9 @@
             export "RUNTIME=$PWD/runtime"
           '';
           buildInputs = with pkgs; [
+            llvmPackages_latest.clang-tools
+            llvmPackages_latest.clang
+
             pkgs.darwin.apple_sdk.frameworks.CoreServices
             pkgs.darwin.apple_sdk.frameworks.System
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration

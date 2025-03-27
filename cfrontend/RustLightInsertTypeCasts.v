@@ -186,6 +186,8 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   | (Ctypes.Tlong _ _, Ctypes.Tint I32 Unsigned _) => second_to_first
   | (Ctypes.Tlong _ _, Ctypes.Tint I32 Signed _) => second_to_first
   | (Ctypes.Tlong _ _, Ctypes.Tint _ _ _) => second_through_int
+  | (Ctypes.Tlong Signed _, Ctypes.Tlong Unsigned _) => first_to_second
+  | (Ctypes.Tlong Unsigned _, Ctypes.Tlong Signed _) => second_to_first
 
   (* float and double <-> long *)
   | (Ctypes.Tlong _ _, Ctypes.Tfloat _ _) => first_to_second
@@ -237,7 +239,6 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
   | Econst_long _n _ty
   | Econst_float _n _ty =>
       ret(e)
-  (* add in a cast if we need to decay an array down to a pointer *)
   | Evar id ty
   | Etempvar id ty =>
       match ty with
@@ -347,6 +348,20 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
   | Enull_check _ty => ret(e)
   end.
 
+Print bang_type.
+
+Print type.
+
+Definition insert_arg_cast
+  (arg: rexpr)
+  : rexpr
+  :=
+  match r_typeof arg with
+  | Ctypes.Tint Ctypes.I32 Ctypes.Unsigned a => arg
+  | Ctypes.Tint _ _ a => Ecast arg (Ctypes.Tint Ctypes.I32 Ctypes.Signed a)
+  | Ctypes.Tfloat F32 a => Ecast arg (Ctypes.Tfloat F64 a)
+  | _ => arg
+  end.
 
 Fixpoint insert_cast_arglist
   (al: list rexpr)
@@ -372,8 +387,8 @@ Fixpoint insert_cast_arglist_with_ty_info
       | Tnil =>
         (
           do arg <- insert_cast_expr a1 ;
-          do args <- insert_cast_arglist_with_ty_info a2 Tnil ;
-          ret (arg :: args)
+          do args <- insert_cast_arglist a2 ;
+          ret (insert_arg_cast arg :: args)
         )
       | Tcons ty tyl' =>
       (
