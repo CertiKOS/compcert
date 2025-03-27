@@ -361,11 +361,14 @@ let string_of_init fmt id (expected_length: int option) =
       if c >= 32 && c <= 126 && c <> Char.code '\"' && c <> Char.code '\\'
       then Buffer.add_char b (Char.chr c)
       else
-        if Char.code '\000' == c then Buffer.add_string b "\\0"
-        else if Char.code '\n' == c then Buffer.add_string b "\\n"
-        else if Char.code '\t' == c then Buffer.add_string b "\\t"
-        else if Char.code '\"' == c then Buffer.add_string b "\\\""
-        else Buffer.add_string b (Printf.sprintf "\\%03o" c)
+        if Char.code '\000' = c then Buffer.add_string b "\\0"
+        else if Char.code '\n' = c then Buffer.add_string b "\\n"
+        else if Char.code '\t' = c then Buffer.add_string b "\\t"
+        else if Char.code '\"' = c then Buffer.add_string b "\\\""
+        (* else if 11 = c then Buffer.add_string b "\\v" *)
+        (* else if 12 = c then Buffer.add_string b "\\f" *)
+        (* else if 13 = c then Buffer.add_string b "\\r" *)
+        else Buffer.add_string b (Printf.sprintf "\\x%02x" c)
   | _ ->
       assert false
   in
