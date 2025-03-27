@@ -6339,7 +6339,7 @@ let libc_list = [
   "statx";
   "stpcpy";
   "stpncpy";
-  "strcasecmp";
+  (* "strcasecmp"; *)
   "strcasestr";
   "strcat";
   "strchr";
@@ -6354,7 +6354,7 @@ let libc_list = [
   "strftime";
   "strftime_l";
   "strlen";
-  "strncasecmp";
+  (* "strncasecmp"; *)
   "strncat";
   "strncmp";
   "strncpy";

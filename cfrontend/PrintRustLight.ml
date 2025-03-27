@@ -8,7 +8,7 @@ open RustLight
 open! LibcSymbols
 exception Panic of string
 
-let ty (t: signature) = ()
+let ty (t: atom) = ()
 
 let todo () = failwith "\nTODO\n"
 let unimplemented () = failwith "Not yet implemented"
@@ -85,8 +85,9 @@ let extern_atom_r a =
   try
     let res = Hashtbl.find string_of_atom a in
     (* let _ = printf "NAMEVAR: %s\n" res in *)
-    if res = "main" then "main_2" else
-      if StringSet.mem res rust_keywords then "r#" ^ res else res
+    if res = "main" then "main_2" else(
+      if res = "_" then "_RENAMING_UNDERSCORE" else (
+        if StringSet.mem res rust_keywords then "r#" ^ res else res))
       (* res *)
   with Not_found ->
     "main"
@@ -231,7 +232,7 @@ let rec gen_ty_rust is_nested ty =
       (* cvoid should only appear in function signatures by itself *)
       let rust_ret_ty = (gen_ty_rust false ty) in
       (* all C functions and C pointers look like this *)
-      sprintf "(extern \"C\" fn(%s) -> %s)" r_arglist rust_ret_ty
+      sprintf "(unsafe extern \"C\" fn(%s) -> %s)" r_arglist rust_ret_ty
 
 let map_to_unsigned =
   function
@@ -570,15 +571,16 @@ let rec print_expr fmt e =
              (* (gen_ty_rust false _ty_from) (gen_ty_rust false _ty_to) *)
       | (Ctypes.Tfunction(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
       | (Ctypes.Tstruct(a, _), Ctypes.Tstruct(b, _)) ->
-        if a == b then fprintf fmt "%a" print_expr exp
-        else
+        if a = b then fprintf fmt "%a" print_expr exp
+        else (
+          let (a', b') = (a |> P.to_int, b |> P.to_int) in
           printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2;
-          fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty); ()
+          fprintf fmt "casting (%s as %s %d %d %b)!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty) a' b' (a' = b'); ()
+        )
+
       (* if this is the zero constant, we're going to print int -> pointer *)
       | (_, _) -> printf "FOUND SOMETHING THAT ISNT RIGHT %b %b\n" b1 b2;
         fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
-
-        (* fprintf fmt "ERROR casting %s to %s!!" (gen_ty_rust false e_ty) (gen_ty_rust false ty); *)
     )
 
     (* somewhat complicated because we might want to use *)
@@ -1132,15 +1134,32 @@ let make_syms_usable (syms: ((AST.ident * (RustLight.r_function Ctypes.fundef, C
   )
   (Hashtbl.create 7) syms
 
+let prog_contains_main (prog: RustLight.r_program) =
+  match List.find_opt (fun (id, _dfn) ->
+    let name = extern_atom_r id in
+    name = "main" || name = "_main"
+  ) prog.prog_defs with
+  | Some(_) -> true
+  | None -> false
+
+
 (* TODO this is a bit of a hack. Should probably be handled in the semantics of rustlight *)
 let print_program (sym_mapping: (string, string) Hashtbl.t)
     composite_mapping mod_name f (prog: RustLight.r_program) =
+
+
   let [@warning "-42"] p_defs = prog.prog_defs in
   let [@warning "-42"] p_types = prog.prog_types in
 
   let (imports, extern_typs, in_module_composite_dfns) = gen_imports sym_mapping p_defs composite_mapping p_types mod_name in
 
   fprintf f "@[<v 0>";
+
+  (* this is enabled for all the libraries
+     but not for the file containing main *)
+  if prog_contains_main prog then
+    fprintf f "#![feature(extern_types)]@;@;";
+
 
   (* do printing  *)
 

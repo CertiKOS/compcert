@@ -589,7 +589,7 @@ let create_toml unit =
 {|
 [[bin]]
 name = "main"
-path = "./src/|} ^ (main_name |> List.to_seq |> String.of_seq) ^ ".rs\""
+path = "./src/|} ^ (main_name |> List.to_seq |> String.of_seq |> Filename.basename) ^ ".rs\""
     | None -> ""
   in
   (* TODO is there a less ugly way to do this without carrying the whitespace? *)
