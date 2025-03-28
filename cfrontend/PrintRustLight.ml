@@ -13,7 +13,6 @@ let ty (t: atom) = ()
 let todo () = failwith "\nTODO\n"
 let unimplemented () = failwith "Not yet implemented"
 
-
 (* TODO a lot of the clunky tuples could be replaced with modules *)
 
 let remove_c_extension path =
@@ -85,11 +84,13 @@ let extern_atom_r a =
   try
     let res = Hashtbl.find string_of_atom a in
     (* let _ = printf "NAMEVAR: %s\n" res in *)
-    if res = "main" then "main_2" else(
-      if res = "_" then "_RENAMING_UNDERSCORE" else (
-        if StringSet.mem res rust_keywords then "r#" ^ res else res))
+    (* if res = "main" then "main_2" else( *)
+    if res = "_" then "_RENAMING_UNDERSCORE" else (
+      if StringSet.mem res rust_keywords then "r#" ^ res else res)
+      (* ) *)
       (* res *)
   with Not_found ->
+    (* TODO shouldn't need this anymore *)
     "main"
 
 let get_len_of_char_arr (t: coq_type) =
@@ -710,11 +711,6 @@ and print_cases fmt cases =
 let print_function fmt id fn =
   let fn_name = extern_atom_r id in
 
-  (* TODO this is cursed and will get better once we integrate with compcerto*)
-  (* let fn_name =  *)
-  (*   if unprocessed_name = "main" then "main_2" *)
-  (*   else if (String.get unprocessed_name 0) = '$' then "main" *)
-  (*   else unprocessed_name in *)
   let fn_params = fn.fn_params in
   let fn_linkage = if C2C.atom_is_static id then "" else "pub" in
   let fn_args =
@@ -726,13 +722,14 @@ let print_function fmt id fn =
 
   (* HACK this should be reflected in the semantics of rustlight *)
   (* But, we haven't gotten there yet. Rustlight is still generic over c types which isn't right. *)
-  let rty = if fn_name = "main" then "!" else gen_ty_rust false fn.fn_return in
+  (* let rty = if fn_name = "main" then "!" else gen_ty_rust false fn.fn_return in *)
+  let rty = gen_ty_rust false fn.fn_return in
   let needs_space = if String.length fn_linkage != 0 then " " else "" in
 
   (* let safety_qualifier = if fn.fn_is_safe then "" else "unsafe" in *)
 
-  let externc = if fn_name = "main" then "" else ( "extern \"C\"") in
-  let nomangle = if fn_name = "main" then "" else "#[no_mangle]" in
+  let externc = ( "extern \"C\"") in
+  let nomangle = "#[no_mangle]" in
 
 
   fprintf fmt "%s@ @[<v 2>%s%s%s fn %s(%s) -> %s " nomangle fn_linkage needs_space externc fn_name fn_args rty;
@@ -1158,7 +1155,7 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
   (* this is enabled for all the libraries
      but not for the file containing main *)
   if prog_contains_main prog then
-    fprintf f "#![feature(extern_types)]@;@;";
+    fprintf f "#![feature(extern_types)]@;#![no_main]@;@;";
 
 
   (* do printing  *)

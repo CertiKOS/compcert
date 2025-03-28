@@ -219,7 +219,7 @@ Definition print_r_program_from_cfg
   (* since that is not idempotent. Morally speaking it really should be *)
   @@@ RustLightSplitExpr.transl_program
   @@@ RustLightInsertTypeCasts.transl_program
-  @@@ RustLightModifyMain.transl_program
+  (*@@@ RustLightModifyMain.transl_program*)
   @@ print (print_Rustlight sym_mapping composite_mapping name)
   @@@ ret.
 

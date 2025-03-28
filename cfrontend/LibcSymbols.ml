@@ -262,7 +262,7 @@ let libc_list = [
   "user";
   "user_fpregs_struct";
   "user_regs_struct";
-  "utimbuf";
+  (* "utimbuf"; *)
   "utmpx";
   "utsname";
   "winsize";
@@ -5651,7 +5651,7 @@ let libc_list = [
   "backtrace";
   "bind";
   "brk";
-  "bsearch";
+  (* "bsearch"; *)
   "calloc";
   "cfgetispeed";
   "cfgetospeed";
@@ -5742,12 +5742,12 @@ let libc_list = [
   (* "fclose"; *)
   "fcntl";
   "fdatasync";
-  "fdopen";
+  (* "fdopen"; *)
   "fdopendir";
-  "feof";
-  "ferror";
+  (* "feof"; *)
+  (* "ferror"; *)
   "fexecve";
-  "fflush";
+  (* "fflush"; *)
   (* "fgetc"; *)
   "fgetgrent_r";
   "fgetpos";
@@ -5756,7 +5756,7 @@ let libc_list = [
   (* "fgets"; *)
   "fgetspent_r";
   "fgetxattr";
-  "fileno";
+  (* "fileno"; *)
   "flistxattr";
   "flock";
   "fmemopen";
@@ -5940,7 +5940,7 @@ let libc_list = [
   "lseek";
   "lseek64";
   "lsetxattr";
-  "lstat";
+  (* "lstat"; *)
   "lstat64";
   "lutimes";
   "madvise";
@@ -6225,7 +6225,7 @@ let libc_list = [
   "renameat";
   "renameat2";
   "res_init";
-  "rewind";
+  (* "rewind"; *)
   "rewinddir";
   "rmdir";
   "sbrk";
@@ -6313,7 +6313,7 @@ let libc_list = [
   "sigemptyset";
   "sigfillset";
   "sigismember";
-  "signal";
+  (* "signal"; *)
   "signalfd";
   "sigpending";
   "sigprocmask";
@@ -6330,7 +6330,7 @@ let libc_list = [
   "srand";
   "srand48";
   "sscanf";
-  "stat";
+  (* "stat"; *)
   "stat64";
   "statfs";
   "statfs64";
@@ -6424,7 +6424,7 @@ let libc_list = [
   "umount";
   "umount2";
   "uname";
-  "ungetc";
+  (* "ungetc"; *)
   "unlink";
   "unlinkat";
   "unlockpt";
@@ -6432,7 +6432,7 @@ let libc_list = [
   "unshare";
   "uselocale";
   "usleep";
-  "utime";
+  (* "utime"; *)
   "utimensat";
   "utimes";
   "utmpname";
