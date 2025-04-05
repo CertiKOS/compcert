@@ -109,7 +109,7 @@ let rename env id =
   with Not_found ->
     let basename =
       if id.name = "" then Printf.sprintf "_%d" id.stamp else id.name in
-    Printf.printf "RENAMING: %s" basename;
+    (* Printf.printf "RENAMING: %s" basename; *)
 
     let newname =
       if not (StringSet.mem basename env.re_used) && not (StringSet.mem basename rust_keywords) then basename else begin

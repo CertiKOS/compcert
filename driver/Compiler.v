@@ -85,7 +85,7 @@ Parameter print_Clight: Clight.program -> unit.
 Parameter print_Rustlight:
   RustLight.str_map_globals
   -> RustLight.str_map_composites
-  -> string -> RustLight.r_program -> unit.
+    -> string -> string -> RustLight.r_program -> unit.
 Parameter print_clightcfg_in_ml:
   ClightCFG.clightcfg_program -> unit.
 Parameter extract_Symbols: Clight.program -> (list string * list (string * Ctypes.composite_definition)).
@@ -208,6 +208,7 @@ Definition print_r_program_from_cfg
   (sym_mapping: RustLight.str_map_globals)
   (composite_mapping: RustLight.str_map_composites)
   (name: string)
+  (proj_name: string)
   (p: Csyntax.program)
   : res RustLight.r_program
   :=
@@ -220,7 +221,7 @@ Definition print_r_program_from_cfg
   @@@ RustLightSplitExpr.transl_program
   @@@ RustLightInsertTypeCasts.transl_program
   (*@@@ RustLightModifyMain.transl_program*)
-  @@ print (print_Rustlight sym_mapping composite_mapping name)
+  @@ print (print_Rustlight sym_mapping composite_mapping name proj_name)
   @@@ ret.
 
 

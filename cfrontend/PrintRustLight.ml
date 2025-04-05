@@ -185,24 +185,24 @@ let destination : string option ref = ref None
 
 let name_inttype_rust sz sg =
   match sz, sg with
-  | I8, Signed -> "libc::c_schar"
-  | I8, Unsigned -> "libc::c_uchar"
-  | I16, Signed -> "libc::c_short"
-  | I16, Unsigned -> "libc::c_ushort"
-  | I32, Signed -> "libc::c_int"
-  | I32, Unsigned -> "libc::c_uint"
+  | I8, Signed -> "core::ffi::c_schar"
+  | I8, Unsigned -> "core::ffi::c_uchar"
+  | I16, Signed -> "core::ffi::c_short"
+  | I16, Unsigned -> "core::ffi::c_ushort"
+  | I32, Signed -> "core::ffi::c_int"
+  | I32, Unsigned -> "core::ffi::c_uint"
   (* using bool here, libc doesn't have _Bool so use primitive instead*)
   | IBool, _ -> "bool"
 
 let name_floattype_rust sz =
   match sz with
-  | F32 -> "libc::c_float"
-  | F64 -> "libc::c_double"
+  | F32 -> "core::ffi::c_float"
+  | F64 -> "core::ffi::c_double"
 
 let name_longtype_rust sz =
   match sz with
-  | Signed -> "libc::ssize_t"
-  | Unsigned -> "libc::size_t"
+  | Signed -> "core::ffi::c_ssize_t"
+  | Unsigned -> "core::ffi::c_size_t"
 
 let rec map_tylist_to_list tylist =
   match tylist with
@@ -211,7 +211,7 @@ let rec map_tylist_to_list tylist =
 
 let rec gen_ty_rust is_nested ty =
   match ty with
-  | Ctypes.Tvoid -> if is_nested then "libc::c_void" else "()"
+  | Ctypes.Tvoid -> if is_nested then "core::ffi::c_void" else "()"
   | Ctypes.Tint(sz, sg, a) ->
     (* TODO ignoring the attributes for now. The volatile should be handled a layer up probably. Same for align? Either way going for the easy thing *)
     (* TODO deal with visibility modifier *)
@@ -244,10 +244,10 @@ let map_to_unsigned =
 let gen_name_and_ty_rust name ty = name ^ " : " ^ (gen_ty_rust false ty)
 
 let print_primitive_init fmt ty = function
-  | Init_int8 n -> fprintf fmt"(%ld as libc::c_char)" (camlint_of_coqint n)
-  | Init_int16 n -> fprintf fmt "(%ld as libc::c_short)" (camlint_of_coqint n)
-  | Init_int32 n -> fprintf fmt "(%ld as libc::c_int)" (camlint_of_coqint n)
-  | Init_int64 n -> fprintf fmt "(%Ld as libc::c_long)" (camlint64_of_coqint n)
+  | Init_int8 n -> fprintf fmt"(%ld as core::ffi::c_char)" (camlint_of_coqint n)
+  | Init_int16 n -> fprintf fmt "(%ld as core::ffi::c_short)" (camlint_of_coqint n)
+  | Init_int32 n -> fprintf fmt "(%ld as core::ffi::c_int)" (camlint_of_coqint n)
+  | Init_int64 n -> fprintf fmt "(%Ld as core::ffi::c_long)" (camlint64_of_coqint n)
   | Init_float32 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_float64 n -> fprintf fmt "%.15F" (camlfloat_of_coqfloat n)
   | Init_space n -> fprintf fmt "(0 as %s)" (gen_ty_rust false ty)
@@ -434,7 +434,7 @@ let rec print_expr fmt e =
   (*       print_expr cond print_expr if_branch print_expr else_branch *)
   (*   ) *)
   | Econst_int(n, Ctypes.Tint(I32, Unsigned, _)) ->
-    fprintf fmt "(%lu as libc::c_uint)" (camlint_of_coqint n)
+    fprintf fmt "(%lu as core::ffi::c_uint)" (camlint_of_coqint n)
   | Econst_int(n, Ctypes.Tint(IBool, _, _)) ->
     fprintf fmt "%s"
     begin match (camlint_of_coqint n) with
@@ -729,7 +729,7 @@ let print_function fmt id fn =
   (* let safety_qualifier = if fn.fn_is_safe then "" else "unsafe" in *)
 
   let externc = ( "extern \"C\"") in
-  let nomangle = "#[no_mangle]" in
+  let nomangle = "#[unsafe(no_mangle)]" in
 
 
   fprintf fmt "%s@ @[<v 2>%s%s%s fn %s(%s) -> %s " nomangle fn_linkage needs_space externc fn_name fn_args rty;
@@ -804,7 +804,7 @@ let get_fn_foreign_syms
   list_of_ids (* idents that might be global symbols *)
   cur_sym_map (* module name -> {imports from that module}  *) (* what we're filling out for the used symbols *)
   =
-  printf "UID list of ids %d\n" (List.length list_of_ids);
+  (* printf "UID list of ids %d\n" (List.length list_of_ids); *)
   List.fold_left
     (fun acc id ->
        let name = extern_atom_r id in
@@ -815,7 +815,7 @@ let get_fn_foreign_syms
        | None -> (
            (* it's a libc symbol, so we can import from libc *)
            if StringSet.mem name libc_symbol_set then (
-             printf "UID couldn't find module for symbol %s in mapping. Assuming libc\n" name;
+             (* printf "UID couldn't find module for symbol %s in mapping. Assuming libc\n" name; *)
              let maybe_hs = Hashtbl.find_opt acc "libc" in
              match maybe_hs with
              | None ->
@@ -865,9 +865,9 @@ let [@warning "-42"] get_used_tys_in_prog
       | (_id, Gvar v) -> acc
 
       | (id, Gfun Internal rf) ->
-          let fn_name = extern_atom_r id in
+          (* let fn_name = extern_atom_r id in *)
           let r_used_types = rf.fn_ty_imports in
-          printf "\n\n function %s has %d imports \n\n" fn_name (List.length (PositiveSet.elements r_used_types));
+          (* printf "\n\n function %s has %d imports \n\n" fn_name (List.length (PositiveSet.elements r_used_types)); *)
           PositiveSet.union acc r_used_types
       | _ -> acc
 
@@ -876,7 +876,9 @@ let [@warning "-42"] get_used_tys_in_prog
 let rec extract_tys_from_ty ty =
   match ty with
   | Tstruct(id, _)
-  | Tunion(id, _) -> printf "extracted %s" (extern_atom_r id); [id]
+  | Tunion(id, _) ->
+      (* printf "extracted %s" (extern_atom_r id);  *)
+      [id]
   | Tarray(ty, _, _)
   | Tpointer(ty, _) -> extract_tys_from_ty ty
   | Tfunction(tl, ty, _) ->
@@ -893,7 +895,9 @@ let get_contained_typ_idents (Ctypes.Composite(id, sou, members, _))
   List.fold_left (
     fun acc ele ->
       match ele with
-      | Member_plain(_id, ty) -> printf "\n CONSIDERING MEMBER %s\n" (extern_atom_r _id); extract_tys_from_ty ty @ acc
+      | Member_plain(_id, ty) ->
+          (* printf "\n CONSIDERING MEMBER %s\n" (extern_atom_r _id);  *)
+          extract_tys_from_ty ty @ acc
       | Member_bitfield(_, _, _, _, _, _) -> unimplemented()
   ) [] members
 
@@ -916,13 +920,13 @@ let rec recursively_gen_composite_defns_and_imports
         if StringSet.mem name seen_idents then
           dflt_value
         else (
-          printf "\n CONSIDERING %s\n" name;
+          (* printf "\n CONSIDERING %s\n" name; *)
           match Hashtbl.find_opt composite_mapping name with
             | Some(Some(mod_name, (Ctypes.Composite(id, _, _, _) as cdef))) ->
-                printf "\n %s in GLBLS\n" name;
+                (* printf "\n %s in GLBLS\n" name; *)
                 if Hashtbl.mem in_module_composite_defns id then
                   let contained_typs = get_contained_typ_idents cdef in
-                  printf "\n %s in MODULE\n" name;
+                  (* printf "\n %s in MODULE\n" name; *)
                   (stack' @ contained_typs, (seen_idents_updated, glbl_imports, extern_typs, in_module_composite_defns))
                 else
                   (match Hashtbl.find_opt glbl_imports mod_name with
@@ -975,7 +979,7 @@ let [@warning "-42"] gen_imports
 
   (* this is the list of composite types that were used by functions *)
   let used_composites = get_used_tys_in_prog fn_defs |> PositiveSet.elements in
-  printf "\n USED COMPOSITES LENGTH IS: %d FOR MODULE %s\n" (List.length used_composites) mod_name;
+  (* printf "\n USED COMPOSITES LENGTH IS: %d FOR MODULE %s\n" (List.length used_composites) mod_name; *)
 
   (* this returns the list of variables and functions (but NOT types) that are not module local *)
   let imports_from_gbls_syms = List.fold_left
@@ -1002,15 +1006,16 @@ let [@warning "-42"] gen_imports
         (* | None -> printf "UUID: NOT FOUND STRUCT %s" r; false *)
         | None -> (
           (* TODO this is wrong. Should mark as anonymous in hashtbl *)
-          printf "ANON struct %s" r; true
+          (* printf "ANON struct %s" r;  *)
+          true
         )
         (* might be external to module *)
         | Some (Some (mname, _)) ->
-          printf "\nUUID: mod name %s, %s len modname: %d, nmame %d, eq %b\n"
-            mod_name mname
-            (String.length mod_name)
-            (String.length mname)
-            (mname = mod_name) ;
+          (* printf "\nUUID: mod name %s, %s len modname: %d, nmame %d, eq %b\n" *)
+          (*   mod_name mname *)
+          (*   (String.length mod_name) *)
+          (*   (String.length mname) *)
+          (*   (mname = mod_name) ; *)
             mname = mod_name
         (* internal to module *)
         | Some (None) -> true
@@ -1050,20 +1055,22 @@ let [@warning "-42"] gen_imports
   (* )) (imports_from_gbls_syms, StringSet.empty, defined_in_module) (used_composites @ defined_in_module_idents) in *)
   (* (imports_from_composite, extern_typs, defined_in_module) *)
 
-let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) =
+let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) project_name contains_main =
   Hashtbl.iter (fun module_ impts ->
     if module_ = "external_symbols" || module_ = mod_name then
       (* do nothing here, we'll print afterwards *)
       ()
     else (
-      printf "\n\nDOING EXPORTS FOR %s\n\n" module_;
+      (* printf "\n\nDOING EXPORTS FOR %s\n\n" module_; *)
       fprintf fmt "@[";
       let elts = StringSet.elements impts in
       let size = List.length elts in
       (* TODO this line will have to be changed *)
       let crate =
         if module_ = "libc" then "" else
-          if mod_name = "main" then "rust_project::" else "crate::" in
+          (* if mod_name = "main" then project_name ^ "rust_project" else "crate::" in *)
+
+          if contains_main then project_name ^ "::" else "crate::" in
       (if size == 1 then
         let ele = List.hd elts in
         fprintf fmt "use %s%s::%s;" crate (remove_c_extension module_) ele
@@ -1080,7 +1087,7 @@ let print_extern_types
   fmt
   (extern_types: StringSet.t)
   =
-    fprintf fmt "extern \"C\" {@ @[<v 2>@;";
+    fprintf fmt "unsafe extern \"C\" {@ @[<v 2>@;";
     List.iter
     (fun name ->
       fprintf fmt "pub type %s;" name
@@ -1091,7 +1098,7 @@ let print_externs fmt
   (extern_imports: StringSet.t)
   (sigs: (string, (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef ) Hashtbl.t)
   =
-    fprintf fmt "extern \"C\" {@ @[<v 2>@;";
+    fprintf fmt "unsafe extern \"C\" {@ @[<v 2>@;";
     List.iter (fun elt ->
       match Hashtbl.find_opt sigs elt with
       | Some(Gfun(External(ef, tl, rty, _))) -> (
@@ -1142,7 +1149,9 @@ let prog_contains_main (prog: RustLight.r_program) =
 
 (* TODO this is a bit of a hack. Should probably be handled in the semantics of rustlight *)
 let print_program (sym_mapping: (string, string) Hashtbl.t)
-    composite_mapping mod_name f (prog: RustLight.r_program) =
+    composite_mapping mod_name f (prog: RustLight.r_program)
+    (project_name: string)
+    =
 
 
   let [@warning "-42"] p_defs = prog.prog_defs in
@@ -1152,15 +1161,17 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
 
   fprintf f "@[<v 0>";
 
+  let has_main_fn = prog_contains_main prog in
+
   (* this is enabled for all the libraries
      but not for the file containing main *)
-  if prog_contains_main prog then
-    fprintf f "#![feature(extern_types)]@;#![no_main]@;@;";
+  if has_main_fn then
+    fprintf f "#![feature(extern_types)]@;#![feature(c_size_t)]@;#![no_main]@;@;";
 
 
   (* do printing  *)
 
-  print_imports f mod_name imports composite_mapping;
+  print_imports f mod_name imports composite_mapping project_name has_main_fn;
 
   (match Hashtbl.find_opt imports "external_symbols" with
   | Some external_symbols -> (
@@ -1172,9 +1183,9 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
 
   let in_module_composite_defns_list = in_module_composite_dfns |> Hashtbl.to_seq |> List.of_seq |> List.map snd in
 
-  List.iter
-    (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name
-                (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_defns_list;
+  (* List.iter *)
+  (*   (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name *)
+  (*               (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_defns_list; *)
 
   List.iter (define_composite f) in_module_composite_defns_list;
   List.iter (print_globdef f p_types) p_defs;
@@ -1211,7 +1222,7 @@ let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_de
 let rec print_prog_types prog_types mod_name =
   match prog_types with
   | Composite(ty_ident, _, _, _) :: l' ->
-      printf "\nTHIS TYPE IS ty: %s for mod %s \n" (extern_atom_r ty_ident) mod_name ;
+      (* printf "\nTHIS TYPE IS ty: %s for mod %s \n" (extern_atom_r ty_ident) mod_name ; *)
       print_prog_types l' mod_name
   | nil -> ()
 
@@ -1220,8 +1231,10 @@ let print_if
   (clunky_sym_mapping: str_map_globals)
   (clunky_composite_mapping: str_map_composites)
   (clunky_mod_name: char list)
+  (clunky_project_name: char list)
   (prog: r_program) =
     let mod_name = List.to_seq clunky_mod_name |> String.of_seq in
+    let project_name = List.to_seq clunky_project_name |> String.of_seq in
     match !destination with
     | None -> printf "MISSING DEST FOR %s" mod_name
     | Some f ->
@@ -1231,18 +1244,18 @@ let print_if
       (* to a more efficient representation *)
       let sym_mapping = fix_mapping_types clunky_sym_mapping in
       let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
-      printf "\nUUID mod_name %s\n" mod_name;
+      (* printf "\nUUID mod_name %s\n" mod_name; *)
       (* let len_mapping = Hashtbl.length mapping in *)
-      printf "UUID hashtbl";
-      pretty_print_hashtbl composite_mapping;
-      change_directory "./rust_project/src/";
-      printf "DOIN opening out: %s\n" f;
+      (* printf "UUID hashtbl"; *)
+      (* pretty_print_hashtbl composite_mapping; *)
+      "./" ^ project_name ^ "/src/" |> change_directory;
+      (* printf "DOIN opening out: %s\n" f; *)
       let oc = open_out f in
-      printf "DOING success opening out\n";
-      printf "PROG TYPES";
+      (* printf "DOING success opening out\n"; *)
+      (* printf "PROG TYPES"; *)
       print_prog_types prog.prog_types mod_name;
 
-      printf "END PROG TYPES";
-      print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog;
+      (* printf "END PROG TYPES"; *)
+      print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog project_name;
       close_out oc;
       change_directory "../..";

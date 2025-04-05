@@ -42,7 +42,9 @@ let option_dprepro = ref false
 let option_dparse = ref false
 let option_dcmedium = ref false
 let option_dclight = ref false
+let option_drustlight_name = ref "rust_project"
 let option_drustlight = ref false
+(* TODO remove*)
 let option_drustproj = ref false
 let option_dcminor = ref false
 let option_drtl = ref false

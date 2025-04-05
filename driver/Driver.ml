@@ -72,6 +72,8 @@ let sym_mapping : (str_map_globals) ref = ref (StrMap.empty)
 (* struct or union ident -> (file, defn) option  *)
 let composite_mapping : (str_map_composites) ref = ref (StrMap.empty)
 
+let main_mod_name : string ref = ref ""
+
 (* Optional sdump suffix *)
 let sdump_suffix = ref ".json"
 
@@ -126,7 +128,7 @@ let compile_c_file sourcename ifile ofile =
   (* ; *)
 
   match
-    (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name csyntax)
+    (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name (!option_drustlight_name |> String.to_seq |> List.of_seq) csyntax)
   with
   | Errors.OK _rprog -> printf "translated!"
   | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
@@ -168,7 +170,7 @@ let compile_c_file sourcename ifile ofile =
 (* From C source to asm *)
 
 let compile_i_file sourcename preproname =
-  printf"\nCOMPILE_I IS CALLED\n";
+  (* printf"\nCOMPILE_I IS CALLED\n"; *)
   if !option_interp then begin
     Machine.config := Machine.compcert_interpreter !Machine.config;
     let csyntax = parse_c_file sourcename preproname in
@@ -192,7 +194,7 @@ let compile_i_file sourcename preproname =
 let create_directory dir_name =
 try
   Unix.mkdir dir_name 0o755;  (* 0o755 is the permission code *)
-  Printf.printf "Directory '%s' created successfully.\n" dir_name
+  (* Printf.printf "Directory '%s' created successfully.\n" dir_name *)
 with
 | Unix.Unix_error (err, _, _) ->
   Printf.printf "\nError creating directory: %s with error %s\n\n" dir_name (Unix.error_message err)
@@ -200,7 +202,7 @@ with
 (* Processing of a .c file *)
 
 let process_c_file sourcename =
-  printf"\nPROCESS_C IS CALLED\n";
+  (* printf"\nPROCESS_C IS CALLED\n"; *)
   ensure_inputfile_exists sourcename;
   if !option_E then begin
     preprocess sourcename (output_filename_default "-");
@@ -507,6 +509,7 @@ let cmdline_actions =
   Exact "-dparse", Set option_dparse;
   Exact "-dc", Set option_dcmedium;
   Exact "-dclight", Set option_dclight;
+  Exact "-dprojname", String (fun s -> option_drustlight_name := s; );
   Exact "-dcminor", Set option_dcminor;
   Exact "-drtl", Set option_drtl;
   Exact "-dltl", Set option_dltl;
@@ -559,7 +562,8 @@ let cmdline_actions =
       fatal_error no_loc "Unknown option `%s'" s);
 (* File arguments *)
   Suffix ".c", Self (* the entire function here gets executed *) (fun s ->
-      printf "next cmd: %s\n" s; add_to_list s; print_string_list !list_c_files; push_action process_c_file s;
+      (* printf "next cmd: %s\n" s;  *)
+      add_to_list s; print_string_list !list_c_files; push_action process_c_file s;
       incr num_source_files; incr num_input_files);
   Suffix ".i", Self (fun s ->
       push_action process_i_file s; incr num_source_files; incr num_input_files);
@@ -585,19 +589,20 @@ let create_toml unit =
   let oc = open_out "Cargo.toml" in  (* Open the file for writing *)
   let maybe_bin =
     match StrMap.find ("main" |> String.to_seq |> List.of_seq) !sym_mapping with
-    | Some main_name ->
+    | Some main_name ->(
+      main_mod_name := main_name |> List.to_seq |> String.of_seq |> Filename.basename;
 {|
 [[bin]]
 name = "main"
-path = "./src/|} ^ (main_name |> List.to_seq |> String.of_seq |> Filename.basename) ^ ".rs\""
+path = "./src/|} ^ !main_mod_name ^ ".rs\"")
     | None -> ""
   in
   (* TODO is there a less ugly way to do this without carrying the whitespace? *)
   let content = {|
 [package]
-name = "rust_project"
+name = "|} ^ !option_drustlight_name ^ {|"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 libc = "0.2.158"
@@ -615,7 +620,8 @@ let create_lib unit =
   let content = List.fold_left
       (fun result file ->
          let module_name = remove_c_extension file in
-         if module_name <> "main" then result^"\npub mod "^module_name^";\n" else result) "#![feature(extern_types)]\n\n" !list_c_files in
+         (* HACK really should separate into function and pass from create_tol *)
+         if module_name <> !main_mod_name then result^"\npub mod "^module_name^";\n" else result) "#![feature(extern_types)]\n#![feature(c_size_t)]\n" !list_c_files in
   let oc = open_out "lib.rs" in
   output_string oc content;
   close_out oc
@@ -629,8 +635,8 @@ let change_directory dir_name =
     Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
 
 let generate_boilerplate_rust unit =
-  create_directory "rust_project";
-  change_directory "./rust_project";
+  create_directory (!option_drustlight_name);
+  "./" ^ !option_drustlight_name |> change_directory;
   create_toml ();
   create_directory "src";
   change_directory "./src";
