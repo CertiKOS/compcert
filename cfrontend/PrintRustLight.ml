@@ -542,19 +542,34 @@ let rec print_expr fmt e =
     | (Cop.Osub, Ctypes.Tpointer(_, _), Ctypes.Tpointer(_, _)) -> (
         fprintf fmt "(%a).offset_from(%a)" print_expr e1 print_expr e2
       )
-    | (Cop.Osub, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+    | (Cop.Osub, Ctypes.Tint(_, Unsigned, _), Ctypes.Tint(_, Unsigned, _)) -> (
         fprintf fmt "(%a).wrapping_sub(%a)" print_expr e1 print_expr e2
       )
-    | (Cop.Oadd, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+    | (Cop.Oadd, Ctypes.Tint(_, Unsigned, _), Ctypes.Tint(_, Unsigned, _)) -> (
         fprintf fmt "(%a).wrapping_add(%a)" print_expr e1 print_expr e2
       )
-    | (Cop.Omul, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+    | (Cop.Omul, Ctypes.Tint(_, Unsigned, _), Ctypes.Tint(_, Unsigned, _)) -> (
         fprintf fmt "(%a).wrapping_mul(%a)" print_expr e1 print_expr e2
       )
-    | (Cop.Odiv, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+    | (Cop.Odiv, Ctypes.Tint(_, Unsigned, _), Ctypes.Tint(_, Unsigned, _)) -> (
         fprintf fmt "(%a).wrapping_div(%a)" print_expr e1 print_expr e2
       )
-    | (Cop.Omod, Ctypes.Tint(I32, Unsigned, _), Ctypes.Tint(I32, Unsigned, _)) -> (
+    | (Cop.Omod, Ctypes.Tint(_, Unsigned, _), Ctypes.Tint(_, Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_rem(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Osub, Ctypes.Tlong(Unsigned, _), Ctypes.Tlong(Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_sub(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Oadd, Ctypes.Tlong(Unsigned, _), Ctypes.Tlong(Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_add(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Omul, Ctypes.Tlong(Unsigned, _), Ctypes.Tlong(Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_mul(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Odiv, Ctypes.Tlong(Unsigned, _), Ctypes.Tlong(Unsigned, _)) -> (
+        fprintf fmt "(%a).wrapping_div(%a)" print_expr e1 print_expr e2
+      )
+    | (Cop.Omod, Ctypes.Tlong(Unsigned, _), Ctypes.Tlong(Unsigned, _)) -> (
         fprintf fmt "(%a).wrapping_rem(%a)" print_expr e1 print_expr e2
       )
     | (_, _, _) ->
@@ -1085,8 +1100,13 @@ let convert_idents_to_mod (res_idents:  (ident, (ident * string)) Hashtbl.t) (im
     | Some (existing : StringSet.t) -> Hashtbl.replace acc m_to_module (StringSet.add (m_to_name |> extern_atom_r) existing) ; acc
   ) res_idents import_map
 
-let define_composite_type_alias fmt project_name contains_main (in_mod_ident, (imported_ident, mod_name)) =
-  fprintf fmt "@;pub type %s = %s::%s::%s;@;" (extern_atom_r in_mod_ident) (if contains_main then project_name else "crate") mod_name (extern_atom_r imported_ident)
+let define_composite_type_alias fmt cur_mod_name project_name contains_main (in_mod_ident, (imported_ident, mod_name)) =
+  (* TODO easier way to do repeated code*)
+  if cur_mod_name <> mod_name then
+    fprintf fmt "@;pub type %s = %s::%s::%s;@;" (extern_atom_r in_mod_ident) (if contains_main then project_name else "crate") mod_name (extern_atom_r imported_ident)
+  else
+    fprintf fmt "@;pub type %s = %s;@;" (extern_atom_r in_mod_ident) (extern_atom_r imported_ident)
+
 
 
 let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) project_name contains_main (res_idents: (ident, (ident * string)) Hashtbl.t) =
@@ -1224,7 +1244,7 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
   (*               (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_defns_list; *)
 
   List.iter (define_composite f) in_module_composite_defns_list;
-  List.iter (define_composite_type_alias f project_name has_main_fn) (res_idents |> Hashtbl.to_seq |> List.of_seq);
+  List.iter (define_composite_type_alias f mod_name project_name has_main_fn) (res_idents |> Hashtbl.to_seq |> List.of_seq);
   List.iter (print_globdef f p_types) p_defs;
   fprintf f "@]@."
 

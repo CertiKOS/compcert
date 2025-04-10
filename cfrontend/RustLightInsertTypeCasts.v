@@ -363,6 +363,8 @@ Definition insert_arg_cast
   | _ => arg
   end.
 
+Print bang_type.
+
 Fixpoint insert_cast_arglist
   (al: list rexpr)
   {struct al}:
@@ -372,7 +374,17 @@ Fixpoint insert_cast_arglist
   | a1 :: a2 =>
       do arg <- insert_cast_expr a1 ;
       do args <- insert_cast_arglist a2 ;
-      ret ((Ecast arg bang_type) :: args)
+
+      let res :=
+      match r_typeof arg with
+      | Ctypes.Tfloat F32 a => (Ecast arg (Ctypes.Tfloat F64 a))
+      | Ctypes.Tint _ a _ => (Ecast arg bang_type)
+      | _ => arg
+      end
+      in
+
+
+      ret (res :: args)
   end.
 
 Fixpoint insert_cast_arglist_with_ty_info
@@ -386,9 +398,7 @@ Fixpoint insert_cast_arglist_with_ty_info
       match tyl with
       | Tnil =>
         (
-          do arg <- insert_cast_expr a1 ;
-          do args <- insert_cast_arglist a2 ;
-          ret (insert_arg_cast arg :: args)
+          insert_cast_arglist al
         )
       | Tcons ty tyl' =>
       (
