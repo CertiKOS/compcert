@@ -120,30 +120,12 @@ let compile_c_file sourcename ifile ofile =
 
   let module_name = remove_c_extension sourcename |> String.to_seq |> List.of_seq in
 
-  (* match *)
-  (*   (Compiler.print_r_program !sym_mapping !composite_mapping module_name csyntax) *)
-  (* with *)
-  (* | Errors.OK _rprog -> printf "translated!" *)
-  (* | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg); *)
-  (* ; *)
-
   match
     (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name (!option_drustlight_name |> String.to_seq |> List.of_seq) csyntax)
   with
   | Errors.OK _rprog -> printf "translated!"
   | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
   ;
-  (* (1) call out to transf_rust_program *)
-  (* (2)  *)
-  (* (3)  *)
-  (* (4)  *)
-
-  (*let maybe_rust = Compiler.transf_clight_program_to_rust csyntax in
-  match maybe_rust with
-  | Errors.OK rustsyntax -> ()
-  | Errors.Error msg -> ()
-    ;*)
-
 
   (* Convert to Asm *)
   (* this calls out to compiler.v::transf_c_program*)

@@ -8,10 +8,11 @@ open RustLight
 open! LibcSymbols
 exception Panic of string
 
-let ty (t: atom) = ()
-
 let todo () = failwith "\nTODO\n"
 let unimplemented () = failwith "Not yet implemented"
+
+(* let a: struct_or_union = todo () ;; *)
+
 
 (* TODO a lot of the clunky tuples could be replaced with modules *)
 
@@ -98,6 +99,55 @@ let get_len_of_char_arr (t: coq_type) =
   | Tarray(_, l, _) ->
       Some(camlint_of_coqint l|> Int32.to_int)
   | _ -> None
+
+let is_anon_defn (s : string) : bool =
+  let len = String.length s in
+  let rec check_digits i =
+    if i = len then true
+    else
+      let c = String.get s i in
+      if c >= '0' && c <= '9' then
+        check_digits (i + 1)
+      else
+        false
+  in
+  len >= 2 && String.get s 0 = '_' && check_digits 1
+
+let check_mod_for_extra_types
+  (* ident -> (module, defn)*)
+  (composite_mapping: (string, (string * Ctypes.composite_definition) option) Hashtbl.t)
+  (in_module_composite_defns: (ident, composite_definition) Hashtbl.t)
+  (cur_mod: string)
+  : (ident, (ident * string)) Hashtbl.t
+  =
+    let (rval, new_inmod_defns) =
+      Hashtbl.fold (fun (name: ident) (Composite(_, s_or_u, membs, atrs): composite_definition) (acc, new_vals) ->
+        if extern_atom_r name |> is_anon_defn then (
+          printf "WORKING ON %s" (extern_atom_r name);
+          let (mapped_ident, m_name) =
+            Hashtbl.fold (fun (c_name: string) maybe_defn (least_ident, least_ident_mod) ->
+                match maybe_defn with
+                | Some(c_mod, Composite(c_id, s_or_u', membs', atrs')) -> (
+                  printf "CONSIDERING %s %b" (extern_atom_r c_id) (c_id < name);
+                  if s_or_u = s_or_u' && membs = membs' && c_id < least_ident then (
+                    printf "YES"; (c_id, c_mod))
+                  else(
+                    printf "NO"; (least_ident, least_ident_mod)))
+                | _ -> (least_ident, least_ident_mod)
+              ) composite_mapping (name, "none") in
+          if mapped_ident <> name then (
+            Hashtbl.add acc name (mapped_ident, m_name);
+            if m_name = cur_mod then (
+              Hashtbl.add new_vals (mapped_ident) (Composite(mapped_ident, s_or_u, membs, atrs));
+            );
+            (acc, new_vals)
+          )
+          else (acc, new_vals))
+        else (acc, new_vals)
+      ) in_module_composite_defns (Hashtbl.create 5, Hashtbl.create 5) in
+    Hashtbl.iter (fun n i -> Hashtbl.replace in_module_composite_defns n i) new_inmod_defns;
+    rval
+
 
 (* open TODOs: *)
 (* - IMPLICIT CONVERSIONS !*)
@@ -920,13 +970,13 @@ let rec recursively_gen_composite_defns_and_imports
         if StringSet.mem name seen_idents then
           dflt_value
         else (
-          (* printf "\n CONSIDERING %s\n" name; *)
+          printf "\n CONSIDERING %s\n" name;
           match Hashtbl.find_opt composite_mapping name with
             | Some(Some(mod_name, (Ctypes.Composite(id, _, _, _) as cdef))) ->
-                (* printf "\n %s in GLBLS\n" name; *)
+                printf "\n %s in GLBLS\n" name;
                 if Hashtbl.mem in_module_composite_defns id then
                   let contained_typs = get_contained_typ_idents cdef in
-                  (* printf "\n %s in MODULE\n" name; *)
+                  printf "\n %s in MODULE\n" name;
                   (stack' @ contained_typs, (seen_idents_updated, glbl_imports, extern_typs, in_module_composite_defns))
                 else
                   (match Hashtbl.find_opt glbl_imports mod_name with
@@ -975,7 +1025,7 @@ let [@warning "-42"] gen_imports
     (composite_mapping: (string, (string * Ctypes.composite_definition) option) Hashtbl.t)
     prog_types
     mod_name
-  : ((string, StringSet.t) Hashtbl.t * StringSet.t * _) =
+  : ((string, StringSet.t) Hashtbl.t * StringSet.t * _ * (ident, (ident * string)) Hashtbl.t) =
 
   (* this is the list of composite types that were used by functions *)
   let used_composites = get_used_tys_in_prog fn_defs |> PositiveSet.elements in
@@ -1025,37 +1075,22 @@ let [@warning "-42"] gen_imports
   let defined_in_module_ht = List.fold_left (fun acc (Composite(id, _, _, _) as c) -> Hashtbl.add acc id c; acc) (Hashtbl.create 7) defined_in_module in
 
   let (_seen_idents, glbl_imports, extern_typs, in_module_composite_defns) = recursively_gen_composite_defns_and_imports composite_mapping stack (StringSet.empty, imports_from_gbls_syms, StringSet.empty, defined_in_module_ht) in
-  (glbl_imports, extern_typs, in_module_composite_defns)
+  let res_idents = check_mod_for_extra_types composite_mapping in_module_composite_defns in
+  (glbl_imports, extern_typs, in_module_composite_defns, res_idents mod_name)
 
-  (* let (imports_from_composite, extern_typs) = List.fold_left ( *)
-  (*   fun ((acc, extern_typs) : ((string, StringSet.t) Hashtbl.t) * StringSet.t) elt -> ( *)
-  (*       let r = extern_atom_r elt in *)
-  (*       printf "PRINTING IMPORT FOR COMPOSITE FOR SYMBOL %s" r; *)
-  (*       match Hashtbl.find_opt composite_mapping r with *)
-  (*       (* internal to module *) *)
-  (*       | Some(None) -> printf "\n%s IS INTERNAL TO MODULE\n" r; (acc, extern_typs) *)
-  (*       (* This can happen if the struct is anonymous ? *) *)
-  (*       | None -> printf "\nNOT FOUND STRUCT %s\n" r; *)
-  (*         (acc, StringSet.union extern_typs (StringSet.singleton r)) *)
-  (*       (* might be external to module *) *)
-  (*       | Some (Some (mname, _)) -> ( *)
-  (*         let mname' = remove_c_extension mname in *)
-  (*         if mname' = mod_name then ( *)
-  (*           printf "\n SYMBOL %s FOUND IN CURRENT MODULE %s\n" r mod_name; (acc, extern_typs) *)
-  (*         ) *)
-  (*         else( *)
-  (*           printf "\n SYMBOL %s NOT FOUND IN CURRENT MODULE %s found in %s instead\n" r mod_name mname'; *)
-  (*           match Hashtbl.find_opt acc mname' with *)
-  (*           | Some hs -> (printf "\n SYMBOL %s FOUND IN MODULE %s" r (List.hd (StringSet.elements hs)); *)
-  (*             Hashtbl.replace acc mname' (StringSet.add r hs); (acc, extern_typs)) *)
-  (*           | None -> *)
-  (*             Hashtbl.replace acc mname' (StringSet.singleton r); (acc, extern_typs) *)
-  (*         ) *)
-  (*     ) *)
-  (* )) (imports_from_gbls_syms, StringSet.empty, defined_in_module) (used_composites @ defined_in_module_idents) in *)
-  (* (imports_from_composite, extern_typs, defined_in_module) *)
+let convert_idents_to_mod (res_idents:  (ident, (ident * string)) Hashtbl.t) (import_map: (string, StringSet.t) Hashtbl.t) : (string, StringSet.t) Hashtbl.t =
+  Hashtbl.fold (fun m_from_name (m_to_name, m_to_module) acc ->
+    match Hashtbl.find_opt acc m_to_module with
+    | None -> Hashtbl.add acc m_to_module (extern_atom_r m_to_name |> StringSet.singleton); acc
+    | Some (existing : StringSet.t) -> Hashtbl.replace acc m_to_module (StringSet.add (m_to_name |> extern_atom_r) existing) ; acc
+  ) res_idents import_map
 
-let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) project_name contains_main =
+let define_composite_type_alias fmt project_name contains_main (in_mod_ident, (imported_ident, mod_name)) =
+  fprintf fmt "@;pub type %s = %s::%s::%s;@;" (extern_atom_r in_mod_ident) (if contains_main then project_name else "crate") mod_name (extern_atom_r imported_ident)
+
+
+let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) project_name contains_main (res_idents: (ident, (ident * string)) Hashtbl.t) =
+  (* let import_map = convert_idents_to_mod res_idents import_map_unmerged in *)
   Hashtbl.iter (fun module_ impts ->
     if module_ = "external_symbols" || module_ = mod_name then
       (* do nothing here, we'll print afterwards *)
@@ -1090,7 +1125,7 @@ let print_extern_types
     fprintf fmt "unsafe extern \"C\" {@ @[<v 2>@;";
     List.iter
     (fun name ->
-      fprintf fmt "pub type %s;" name
+      fprintf fmt "pub type %s;@;" name
     ) (StringSet.elements extern_types);
     fprintf fmt "@;<0 -2>}@]@;@;"
 
@@ -1157,7 +1192,8 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
   let [@warning "-42"] p_defs = prog.prog_defs in
   let [@warning "-42"] p_types = prog.prog_types in
 
-  let (imports, extern_typs, in_module_composite_dfns) = gen_imports sym_mapping p_defs composite_mapping p_types mod_name in
+  let (imports, extern_typs, in_module_composite_dfns, res_idents) = gen_imports sym_mapping p_defs composite_mapping p_types mod_name in
+
 
   fprintf f "@[<v 0>";
 
@@ -1171,23 +1207,24 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
 
   (* do printing  *)
 
-  print_imports f mod_name imports composite_mapping project_name has_main_fn;
+  print_imports f mod_name imports composite_mapping project_name has_main_fn res_idents;
 
   (match Hashtbl.find_opt imports "external_symbols" with
   | Some external_symbols -> (
     print_externs f external_symbols (prog.prog_defs |> make_syms_usable);
     print_extern_types f extern_typs
-
   )
   | None -> ());
 
-  let in_module_composite_defns_list = in_module_composite_dfns |> Hashtbl.to_seq |> List.of_seq |> List.map snd in
+  let in_module_composite_defns_list = in_module_composite_dfns |> Hashtbl.to_seq |> List.of_seq |> List.filter (fun (name_id, _) -> Hashtbl.mem res_idents name_id |> not) |> List.map snd in
+  (* let in_module_composite_defns_list = in_module_composite_dfns |> Hashtbl.to_seq |> List.of_seq |> List.map snd in *)
 
   (* List.iter *)
   (*   (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name *)
   (*               (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_defns_list; *)
 
   List.iter (define_composite f) in_module_composite_defns_list;
+  List.iter (define_composite_type_alias f project_name has_main_fn) (res_idents |> Hashtbl.to_seq |> List.of_seq);
   List.iter (print_globdef f p_types) p_defs;
   fprintf f "@]@."
 
@@ -1246,8 +1283,8 @@ let print_if
       let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
       (* printf "\nUUID mod_name %s\n" mod_name; *)
       (* let len_mapping = Hashtbl.length mapping in *)
-      (* printf "UUID hashtbl"; *)
-      (* pretty_print_hashtbl composite_mapping; *)
+      printf "UUID hashtbl";
+      pretty_print_hashtbl composite_mapping;
       "./" ^ project_name ^ "/src/" |> change_directory;
       (* printf "DOIN opening out: %s\n" f; *)
       let oc = open_out f in
