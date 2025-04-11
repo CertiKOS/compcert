@@ -460,7 +460,7 @@ Fixpoint insert_cast_stmt (gvt: ident -> res type) (f_rty: type) (stmt: rstateme
       | Tpointer ((Tfunction tyl t cc) as fnty) a =>
         (
           do al' <- insert_cast_arglist_with_ty_info al tyl;
-          ret (S_call x (Ederef name' fnty) al')
+          ret (S_call x (Ecast name' fnty) al')
         )
       | _ =>
         (

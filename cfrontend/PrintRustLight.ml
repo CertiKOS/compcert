@@ -323,6 +323,24 @@ let rec find_comp_defn (tds: composite_definition list) id =
 
 
 
+let rec print_arr fmt (arr: init_data list) =
+    (match arr with
+    | [] -> ()
+    | e :: l -> (
+      let st =
+      match e with
+      | Init_int8 _ -> "int8"
+      | Init_int16 _ -> "int16"
+      | Init_int32 _ -> "int32"
+      | Init_int64 _ -> "int64"
+      | Init_float32 _ -> "flaot32"
+      | Init_float64 _ -> "flaot64"
+      | Init_space num -> "space" ^ (camlint_of_coqint num |> Int32.to_int |> string_of_int)
+      | Init_addrof (_, _) -> "addrof" in
+      fprintf fmt "%s," st; print_arr fmt l))
+
+
+
 let rec print_composite_init fmt tds arr ty =
   (*TODO both cases do the same thing. Make it more dry *)
   match ty with
@@ -333,7 +351,7 @@ let rec print_composite_init fmt tds arr ty =
         match memb with
         | Member_plain(id_memb, ty_memb) -> (
           fprintf fmt "%s: " (extern_atom_r id_memb);
-          let arr_res = print_composite_init fmt tds arr ty_memb in
+          let arr_res = print_composite_init fmt tds acc ty_memb in
           fprintf fmt ",";
           arr_res
         )
@@ -348,7 +366,7 @@ let rec print_composite_init fmt tds arr ty =
         match memb with
         | Member_plain(id_memb, ty_memb) -> (
           fprintf fmt "%s: " (extern_atom_r id_memb);
-          let arr_res = print_composite_init fmt tds arr ty_memb in
+          let arr_res = print_composite_init fmt tds acc ty_memb in
           fprintf fmt ",";
           arr_res
         )
@@ -358,14 +376,16 @@ let rec print_composite_init fmt tds arr ty =
     res
   | Ctypes.Tarray(ty_inner, num, _attrs) -> (
       fprintf fmt "[";
+      (* print_arr fmt arr; fprintf fmt "]"; *)
 
       let res =
       List.fold_left (fun acc _ ->
           let res = print_composite_init fmt tds acc ty_inner in
           fprintf fmt ", ";
           res
-      ) arr (List.init (camlint_of_coqint num |> Int32.to_int) (fun x -> x)) in
+      ) (arr |> List.filter (fun x -> match x with Init_space _ -> false | _ -> true)) (List.init (camlint_of_coqint num |> Int32.to_int) (fun x -> x)) in
       fprintf fmt "]";
+
       res
     )
   | _ -> (
@@ -630,6 +650,9 @@ let rec print_expr fmt e =
     | (false, false) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
     | (b1, b2) -> (
       match (e_ty, ty) with
+      | (Ctypes.Tpointer(Tfunction(a, b, c), d), Ctypes.Tfunction(x, y, z)) -> (
+        fprintf fmt "core::mem::transmute::<%s, %s>(%a)" (gen_ty_rust false e_ty) (gen_ty_rust false ty) print_expr exp;
+      )
       (* TODO go back in rustlight and make sure it's not a wild cast... *)
       | (Ctypes.Tarray(_ty_from, _, _), Ctypes.Tpointer(_ty_to, _))
         (* -> fprintf fmt "((%a).as_mut_ptr() as %s)" print_expr exp (gen_ty_rust false ty) *)
