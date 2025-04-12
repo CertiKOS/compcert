@@ -72,6 +72,8 @@ let sym_mapping : (str_map_globals) ref = ref (StrMap.empty)
 (* struct or union ident -> (file, defn) option  *)
 let composite_mapping : (str_map_composites) ref = ref (StrMap.empty)
 
+let csyntax_mapping : (string, Csyntax.coq_function Ctypes.program) Hashtbl.t ref = ref (Hashtbl.create 5)
+
 let main_mod_name : string ref = ref ""
 
 (* Optional sdump suffix *)
@@ -93,6 +95,8 @@ let extract_globals sourcename =
   let preproname = tmp_file ".i" in
   preprocess sourcename preproname;
   let csyntax = parse_c_file sourcename preproname in
+  Hashtbl.add !csyntax_mapping (remove_c_extension sourcename) csyntax;
+
   Compiler.get_exports csyntax
 
 (* From CompCert C AST to asm *)
@@ -116,9 +120,11 @@ let compile_c_file sourcename ifile ofile =
   (*  TODO add in pass for drust*)
   set_dest AsmToJSON.destination option_sdump !sdump_suffix;
   (* Parse the ast *)
-  let csyntax = parse_c_file sourcename ifile in
 
-  let module_name = remove_c_extension sourcename |> String.to_seq |> List.of_seq in
+  let module_name_string = remove_c_extension sourcename in
+  let module_name =  module_name_string |> String.to_seq |> List.of_seq in
+
+  let csyntax = Hashtbl.find !csyntax_mapping module_name_string in
 
   match
     (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name (!option_drustlight_name |> String.to_seq |> List.of_seq) csyntax)
@@ -407,15 +413,25 @@ let generate_mapping unit =
                               (* first occurence *)
                               | None ->
                                 (
+                                  printf "\nMAYDAY ADDS %s\n" (sym |> List.to_seq |> String.of_seq);
                                   composite_mapping := StrMap.add sym (Some((module_name, dfn))) !composite_mapping;
                                 )
                               (* HACK this is morally wrong. Instead: switch this out to a list of (name, module).
                                  that way, we'll know (from prog_types) which one to use
                                *)
-                              | Some (None) -> printf "UUID explicitly setting to NONE\n"; ()
+                              | Some (None) -> (
+
+                                printf "\nMAYDAY GG %s\n" (sym |> List.to_seq |> String.of_seq);
+                                printf "UUID explicitly setting to NONE\n"; ()
+
+                              )
                               | Some (Some (f, dfn_old)) -> (
-                                  if not (comp_eq dfn dfn_old) then
-                                    composite_mapping := (StrMap.add sym None !composite_mapping);
+                                  if not (comp_eq dfn dfn_old) then (
+                                    printf "\nMAYDAY %s\n" (sym |> List.to_seq |> String.of_seq);
+                                    composite_mapping := (StrMap.add sym None !composite_mapping))
+                                  else (
+                                    printf "\nMAYDAY %s\n" (sym |> List.to_seq |> String.of_seq)
+                                  )
                               )
                           )) (snd l))
         | Errors.Error _ -> printf "ERROR making mapping!"; ())

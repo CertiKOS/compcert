@@ -11,7 +11,7 @@ exception Panic of string
 let todo () = failwith "\nTODO\n"
 let unimplemented () = failwith "Not yet implemented"
 
-(* let a: struct_or_union = todo () ;; *)
+(* let a: member = todo () ;; *)
 
 
 (* TODO a lot of the clunky tuples could be replaced with modules *)
@@ -113,6 +113,39 @@ let is_anon_defn (s : string) : bool =
   in
   len >= 2 && String.get s 0 = '_' && check_digits 1
 
+(* HACK *)
+(* we give a pass for all anonymous structs inside anonymous structs *)
+(* it shouldn't be possible otherwise *)
+let rec check_s_or_u_in_ty ty1 ty2 =
+  match (ty1, ty2) with
+  | (Tstruct(i', a'), Tstruct(j', b'))
+  | (Tunion(i', a'), Tunion(j', b')) ->
+      i' = j' || (is_anon_defn (extern_atom_r i') && is_anon_defn (extern_atom_r j'))
+  | (Tfunction(tl, rty, _cc), Tfunction(tl', rty', _cc')) -> true
+  | (Tpointer(ty, _cc), Tpointer(ty', _cc')) ->
+      check_s_or_u_in_ty ty ty'
+  | _ -> ty1 = ty2
+and check_s_or_u_in_tylist tl1 tl2 =
+  match (tl1, tl2) with
+  | (Tcons(ty1, tl1'), Tcons(ty2, tl2')) ->
+      check_s_or_u_in_ty ty1 ty2 && check_s_or_u_in_tylist tl1' tl2'
+  | (Tnil, Tnil) -> true
+  | _ -> false
+
+
+let rec membs_equal l1 l2 =
+  match (l1, l2) with
+  | ((h :: t), (h' :: t')) ->(
+    match (h, h') with
+    | (Member_plain(i1, ty1), Member_plain(i2, ty2)) -> (
+        i1 = i2 && check_s_or_u_in_ty ty1 ty2 && membs_equal t t'
+    )
+    (* TODO this fails on bitfields, which is fine for now *)
+    | _ -> false
+    )
+  | ([], []) -> true
+  | _ -> false
+
 let check_mod_for_extra_types
   (* ident -> (module, defn)*)
   (composite_mapping: (string, (string * Ctypes.composite_definition) option) Hashtbl.t)
@@ -129,7 +162,7 @@ let check_mod_for_extra_types
                 match maybe_defn with
                 | Some(c_mod, Composite(c_id, s_or_u', membs', atrs')) -> (
                   printf "CONSIDERING %s %b" (extern_atom_r c_id) (c_id < name);
-                  if s_or_u = s_or_u' && membs = membs' && c_id < least_ident then (
+                  if s_or_u = s_or_u' && membs_equal membs membs' && c_id < least_ident then (
                     printf "YES"; (c_id, c_mod))
                   else(
                     printf "NO"; (least_ident, least_ident_mod)))
@@ -515,9 +548,16 @@ let rec print_expr fmt e =
   | Econst_int(n, ty) ->
     fprintf fmt "(%ld as %s)" (camlint_of_coqint n) (gen_ty_rust false ty)
   | Econst_float(f, ty) ->
-    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat f) (gen_ty_rust false ty)
+      let is32bit = match ty with Tfloat(F32, _) -> true | _ -> false in
+      let camlf = camlfloat_of_coqfloat f in
+      let num = if Float.is_infinite camlf then (if is32bit then "core::f32::INFINITY" else "core::f64::INFINITY") else (camlf |> Printf.sprintf "%.18g") in
+      printf "\nGOT THIS FLOAT %f \n" camlf;
+    fprintf fmt "(%s as %s)" (num) (gen_ty_rust false ty)
   | Econst_single(f, ty) ->
-    fprintf fmt "(%.18g as %s)" (camlfloat_of_coqfloat32 f) (gen_ty_rust false ty)
+      let is32bit = match ty with Tfloat(F32, _) -> true | _ -> false in
+      let camlf = camlfloat_of_coqfloat f in
+      let num = if Float.is_infinite camlf then (if is32bit then "core::f32::INFINITY" else "core::f64::INFINITY") else (camlf |> Printf.sprintf "%.18g") in
+    fprintf fmt "(%s as %s)" num (gen_ty_rust false ty)
   | Econst_long(n, Ctypes.Tlong(Unsigned, v)) ->
     fprintf fmt "(%Lu as %s)" (camlint64_of_coqint n) (gen_ty_rust false (Ctypes.Tlong(Unsigned, v)))
   | Econst_long(n, ty) ->
@@ -790,7 +830,7 @@ and print_cases fmt cases =
       fprintf fmt "@[<v 2>_ => {@;%a@;<0 -2>}@]@;" print_stmt body
   | LScons (n, body, stmts) ->
       (match n with
-      | Some(n') -> fprintf fmt "@[<v 2>%s => {@;%a@;<0 -2>}@]@;" (Z.to_string n') print_stmt body
+      | Some(n') -> fprintf fmt "@[<v 2>%ld => {@;%a@;<0 -2>}@]@;" (camlint_of_coqint n') print_stmt body
       | None -> fprintf fmt "@[<v 2>_ => {@;%a@;<0 -2>}@]@;" print_stmt body
       );
       print_cases fmt stmts
@@ -817,7 +857,7 @@ let print_function fmt id fn =
   (* let safety_qualifier = if fn.fn_is_safe then "" else "unsafe" in *)
 
   let externc = ( "extern \"C\"") in
-  let nomangle = "#[unsafe(no_mangle)]" in
+  let nomangle = if C2C.atom_is_static id then "" else "#[unsafe(no_mangle)]" in
 
 
   fprintf fmt "%s@ @[<v 2>%s%s%s fn %s(%s) -> %s " nomangle fn_linkage needs_space externc fn_name fn_args rty;

@@ -218,7 +218,7 @@ let libc_list = [
   "sockaddr_xdp";
   "spwd";
   "stack_t";
-  "stat";
+  (* "stat"; *)
   "stat64";
   "statfs";
   "statfs64";
@@ -5762,7 +5762,6 @@ let libc_list = [
   "fmemopen";
   "fnmatch";
   (* "fopen"; *)
-  "fopen64";
   "fork";
   "forkpty";
   "fpathconf";
