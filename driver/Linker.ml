@@ -61,8 +61,8 @@ let linker_help =
 |}
 
 let linker_actions =
-  [ Prefix "-l", Self push_linker_arg;
-    Prefix "-L", Self push_linker_arg;
+  [ Prefix "-l", Self add_include_dir;
+    Prefix "-L", Self add_search_dir;
     Exact "-nostartfiles", Self (fun s  ->
         if Configuration.gnu_toolchain then
           push_linker_arg s

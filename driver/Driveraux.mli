@@ -50,5 +50,16 @@ val push_action: (string -> string) -> string -> unit
 val push_linker_arg: string -> unit
   (** Add a linker arguments *)
 
+val add_include_dir: string -> unit
+  (** Add a include directdory *)
+
+val add_search_dir: string -> unit
+  (** Add a search directory arguments *)
+
 val perform_actions: unit -> string list
   (** Perform actions *)
+
+module StringSet : Set.S with type elt = string
+
+val search_dir_set: StringSet.t ref
+val include_dir_set: StringSet.t ref

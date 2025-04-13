@@ -611,7 +611,7 @@ path = "src/lib.rs"
 |} ^ maybe_bin
 in
 
-  output_string oc content;      (* Write the string to the file *)
+  output_string oc content;
   close_out oc
 
 let create_lib unit =
@@ -624,13 +624,20 @@ let create_lib unit =
   output_string oc content;
   close_out oc
 
-
 let change_directory dir_name =
   try
     Unix.chdir dir_name;  (* Change the current working directory *)
   with
   | Unix.Unix_error (err, _, _) ->
     Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
+
+let maybe_gen_buildrs () =
+  "./" ^ !option_drustlight_name |> change_directory;
+  if StringSet.is_empty !include_dir_set |> not then (
+    let oc = open_out "build.rs" in
+    let r_string = "fn main() {\n" |> StringSet.fold (fun e acc -> acc ^ "\tprintln!(\"cargo:rustc-link-arg=" ^ e ^ "\");\n") !include_dir_set in
+    output_string oc (r_string ^ "}\n")
+  )
 
 let generate_boilerplate_rust unit =
   create_directory (!option_drustlight_name);
@@ -665,6 +672,7 @@ let _ =
       fatal_error no_loc "option '-main' requires option '-interp'";
     (* the line below is where all the compilation goes *)
     let _linker_args = time "Total compilation time" perform_actions () in
+    maybe_gen_buildrs ();
     check_errors ()
   with
   | Sys_error msg

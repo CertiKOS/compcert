@@ -8,38 +8,40 @@
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = inputs@{ self, nixpkgs, utils, fenix }:
+  outputs = inputs@{ self, nixpkgs, utils, fenix, rust-overlay }:
     utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           # dont' need this but leaving it here just in case I want to
           # do something similar
-          # overlays = [ (import ./overlay.nix) ];
+          overlays = [ (import rust-overlay) ];
         };
+        rust_tc = pkgs.rust-bin.nightly.latest.default;
 
-        fenixStable = with fenix.packages.${system};
-          combine [
-            (latest.withComponents [
-              "miri"
-              "cargo"
-              "clippy"
-              "rust-src"
-              "rustc"
-              "rustfmt"
-              "llvm-tools-preview"
-            ])
-          ];
+        # fenixStable = with fenix.packages.${system};
+        #   combine [
+        #     (latest.withComponents [
+        #       "miri"
+        #       "cargo"
+        #       "clippy"
+        #       "rust-src"
+        #       "rustc"
+        #       "rustfmt"
+        #       "llvm-tools-preview"
+        #     ])
+        #   ];
       in {
         # packages.compcerto = pkgs.coqPackages_8_12.compcerto;
         packages.devshell = self.devShell.${system};
-        devShell = pkgs.mkShell.override { } {
+        devShell = pkgs.mkShell {
           OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
-          RUST_SRC_PATH = "${fenixStable}/lib/rustlib/src/rust/library";
-          RUST_LIB_SRC = "${fenixStable}/lib/rustlib/src/rust/library";
+          RUST_SRC_PATH = "${rust_tc}/lib/rustlib/src/rust/library";
+          RUST_LIB_SRC = "${rust_tc}/lib/rustlib/src/rust/library";
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests -Astatic_mut_refs";
           shellHook = ''
             export PATH="$PATH:$PWD"
@@ -53,7 +55,7 @@
             pkgs.darwin.apple_sdk.frameworks.System
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
             python3
-            fenixStable
+            rust_tc
             nixStable
             fenix.packages.${system}.rust-analyzer
             # rustc deps
@@ -98,6 +100,10 @@
             typst
             # cvc4
             libiconv
+
+            # for robotsmeetkittens
+            ncurses
+            ncurses.dev
             # coqPackages.vscoq-language-server
          ];
         };

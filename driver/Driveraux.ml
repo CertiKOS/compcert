@@ -15,6 +15,14 @@ open Printf
 open Clflags
 open Diagnostics
 
+module StringSet = Set.Make(String)
+(* TODO is there a cleaner way to do this that does not involve global variables? *)
+(* TODO rename this is misleadingly named. This is -l libname *)
+let search_dir_set : StringSet.t ref = ref (StringSet.empty)
+(* TODO rename these are misleadingly named. This is -L aka search path*)
+let include_dir_set : StringSet.t ref = ref (StringSet.empty)
+
+
 (* Safe removal of files *)
 let safe_remove file =
   try Sys.remove file with Sys_error _ -> ()
@@ -134,6 +142,14 @@ let push_action fn arg =
 
 let push_linker_arg arg =
   push_action (fun s -> s) arg
+
+let add_include_dir arg =
+  include_dir_set := StringSet.add arg !include_dir_set;
+  push_linker_arg arg
+
+let add_search_dir arg =
+  search_dir_set := StringSet.add arg !search_dir_set;
+  push_linker_arg arg
 
 let perform_actions () =
   let rec perform = function
