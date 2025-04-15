@@ -439,6 +439,8 @@ Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon
   let seq_stmt := S_sequence s_stmt l_stmt in
   ret seq_stmt.
 
+Print calling_convention.
+Print r_calling_convention.
 
 Definition gen_r_cc (cc: calling_convention) : res (r_calling_convention) :=
   match cc.(AST.cc_vararg) with

@@ -82,6 +82,9 @@ Require Import Compopts.
 
 (** Pretty-printers (defined in Caml). *)
 Parameter print_Clight: Clight.program -> unit.
+Parameter print_Rustlight_main:
+  string -> string -> (RustLight.r_function * ident) -> unit.
+
 Parameter print_Rustlight:
   RustLight.str_map_globals
   -> RustLight.str_map_composites
@@ -204,6 +207,17 @@ Definition print_clightcfg
 
 Locate transl_program.
 
+Definition print_r_main_from_cfg
+  (mod_name: string)
+  (proj_name: string)
+  (p: Csyntax.program)
+  : res (RustLight.r_function * ident)
+  :=
+  OK p
+  @@@ RustLightModifyMain.transl_program
+  @@ print (print_Rustlight_main mod_name proj_name)
+  @@@ ret.
+
 Definition print_r_program_from_cfg
   (sym_mapping: RustLight.str_map_globals)
   (composite_mapping: RustLight.str_map_composites)
@@ -218,6 +232,7 @@ Definition print_r_program_from_cfg
   @@@ RustLightgen.transl_program
   (* note: this has to go before the type casts *)
   (* since that is not idempotent. Morally speaking it really should be *)
+  (* TODO I think I made this idempotent. Should double check *)
   @@@ RustLightSplitExpr.transl_program
   @@@ RustLightInsertTypeCasts.transl_program
   (*@@@ RustLightModifyMain.transl_program*)

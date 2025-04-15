@@ -85,10 +85,10 @@ let extern_atom_r a =
   try
     let res = Hashtbl.find string_of_atom a in
     (* let _ = printf "NAMEVAR: %s\n" res in *)
-    (* if res = "main" then "main_2" else( *)
-    if res = "_" then "_RENAMING_UNDERSCORE" else (
-      if StringSet.mem res rust_keywords then "r#" ^ res else res)
-      (* ) *)
+    if res = "main" then "main_inner" else(
+      if res = "_" then "_RENAMING_UNDERSCORE" else (
+        if StringSet.mem res rust_keywords then "r#" ^ res else res)
+    )
       (* res *)
   with Not_found ->
     (* TODO shouldn't need this anymore *)
@@ -860,7 +860,9 @@ let print_function fmt id fn =
   let nomangle = if C2C.atom_is_static id then "" else "#[unsafe(no_mangle)]" in
 
 
+  printf "PRINTING FUNCTION %s" fn_name;
   fprintf fmt "%s@ @[<v 2>%s%s%s fn %s(%s) -> %s " nomangle fn_linkage needs_space externc fn_name fn_args rty;
+  printf "PRINTed FUNCTION %s" fn_name;
   (* fprintf fmt "@ @[<v 2>{@ "; *)
   fprintf fmt "{@ @[<v 2>unsafe {@ ";
   (* In C we just reserve on the stack *)
@@ -888,7 +890,7 @@ let print_function fmt id fn =
 
   print_stmt fmt fn.fn_body;
 
-  fprintf fmt "@;<0 -2>}@]@;<0 -2>}@]@ "
+  fprintf fmt "@;<0 -2>}@]@;<0 -2>}@]@ @."
 
 let print_fundef fmt id fundef =
   match fundef with
@@ -1172,6 +1174,7 @@ let define_composite_type_alias fmt cur_mod_name project_name contains_main (in_
 
 
 
+(* TODO undo logic for crate use because contains_main is now always false *)
 let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) project_name contains_main (res_idents: (ident, (ident * string)) Hashtbl.t) =
   (* let import_map = convert_idents_to_mod res_idents import_map_unmerged in *)
   Hashtbl.iter (fun module_ impts ->
@@ -1280,17 +1283,17 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
 
   fprintf f "@[<v 0>";
 
-  let has_main_fn = prog_contains_main prog in
+  (* let has_main_fn = prog_contains_main prog in *)
 
   (* this is enabled for all the libraries
      but not for the file containing main *)
-  if has_main_fn then
-    fprintf f "#![feature(extern_types)]@;#![feature(c_size_t)]@;#![no_main]@;@;";
+  (* if has_main_fn then *)
+  (*   fprintf f "#![feature(extern_types)]@;#![feature(c_size_t)]@;#![no_main]@;@;"; *)
 
 
   (* do printing  *)
 
-  print_imports f mod_name imports composite_mapping project_name has_main_fn res_idents;
+  print_imports f mod_name imports composite_mapping project_name false res_idents;
 
   (match Hashtbl.find_opt imports "external_symbols" with
   | Some external_symbols -> (
@@ -1307,7 +1310,7 @@ let print_program (sym_mapping: (string, string) Hashtbl.t)
   (*               (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_defns_list; *)
 
   List.iter (define_composite f) in_module_composite_defns_list;
-  List.iter (define_composite_type_alias f mod_name project_name has_main_fn) (res_idents |> Hashtbl.to_seq |> List.of_seq);
+  List.iter (define_composite_type_alias f mod_name project_name false) (res_idents |> Hashtbl.to_seq |> List.of_seq);
   List.iter (print_globdef f p_types) p_defs;
   fprintf f "@]@."
 
@@ -1345,6 +1348,29 @@ let rec print_prog_types prog_types mod_name =
       (* printf "\nTHIS TYPE IS ty: %s for mod %s \n" (extern_atom_r ty_ident) mod_name ; *)
       print_prog_types l' mod_name
   | nil -> ()
+
+let print_main
+  (clunky_mod_name: char list)
+  (clunky_project_name: char list)
+  ((rfn, new_main_ident): (r_function * ident) )
+  =
+    let mod_name = List.to_seq clunky_mod_name |> String.of_seq in
+    let project_name = List.to_seq clunky_project_name |> String.of_seq in
+    match !destination with
+    | None -> printf "MISSING DEST FOR %s" mod_name
+    | Some f ->
+      "./" ^ project_name ^ "/src/" |> change_directory;
+      let oc = open_out f in
+      let fmt = formatter_of_out_channel oc in
+
+      fprintf fmt "#![feature(extern_types)]@.#![feature(c_size_t)]@.#![no_main]@.@.";
+
+      fprintf fmt "@.use %s::%s::%s;@.@." project_name mod_name "main_inner";
+
+      print_function fmt new_main_ident rfn;
+      close_out oc;
+
+      change_directory "../.."
 
 
 let print_if

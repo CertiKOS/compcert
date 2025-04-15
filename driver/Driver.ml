@@ -126,12 +126,26 @@ let compile_c_file sourcename ifile ofile =
 
   let csyntax = Hashtbl.find !csyntax_mapping module_name_string in
 
+  let project_name = !option_drustlight_name |> String.to_seq |> List.of_seq in
+
+  (* TODO(tech debt) project name no longer needed here. Remove it *)
   match
-    (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name (!option_drustlight_name |> String.to_seq |> List.of_seq) csyntax)
+    (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name (project_name) csyntax)
   with
   | Errors.OK _rprog -> printf "translated!"
   | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
   ;
+
+  PrintRustLight.destination := Some "main.rs";
+
+  if !main_mod_name = module_name_string then
+    match
+    (Compiler.print_r_main_from_cfg module_name project_name csyntax) with
+    | Errors.OK _ -> printf "created generated main function and module"
+    | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
+    ;
+
+
 
   (* Convert to Asm *)
   (* this calls out to compiler.v::transf_c_program*)
@@ -592,7 +606,7 @@ let create_toml unit =
 {|
 [[bin]]
 name = "main"
-path = "./src/|} ^ !main_mod_name ^ ".rs\"")
+path = "./src/|} ^ "main" ^ ".rs\"")
     | None -> ""
   in
   (* TODO is there a less ugly way to do this without carrying the whitespace? *)
@@ -619,7 +633,7 @@ let create_lib unit =
       (fun result file ->
          let module_name = remove_c_extension file in
          (* HACK really should separate into function and pass from create_tol *)
-         if module_name <> !main_mod_name then result^"\npub mod "^module_name^";\n" else result) "#![feature(extern_types)]\n#![feature(c_size_t)]\n" !list_c_files in
+         result^"\npub mod "^module_name^";\n") "#![feature(extern_types)]\n#![feature(c_size_t)]\n" !list_c_files in
   let oc = open_out "lib.rs" in
   output_string oc content;
   close_out oc
