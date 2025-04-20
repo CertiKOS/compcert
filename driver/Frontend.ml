@@ -34,11 +34,11 @@ let v_number =
 (* Predefined macros: version numbers, C11 features *)
 
 let predefined_macros =
-  let macros = [  
+  let macros = [
     "-D__COMPCERT__";
-    sprintf "-D__COMPCERT_MAJOR__=%d" v_major;    
-    sprintf "-D__COMPCERT_MINOR__=%d" v_minor;    
-    sprintf "-D__COMPCERT_VERSION__=%d" v_number;    
+    sprintf "-D__COMPCERT_MAJOR__=%d" v_major;
+    sprintf "-D__COMPCERT_MINOR__=%d" v_minor;
+    sprintf "-D__COMPCERT_VERSION__=%d" v_number;
     "-U__STDC_IEC_559_COMPLEX__";
     "-D__STDC_NO_ATOMICS__";
     "-D__STDC_NO_COMPLEX__";
@@ -76,7 +76,7 @@ let preprocess ifile ofile =
     List.rev !prepro_options;
     [ifile]
   ] in
-  printf "\nif: %s, of: %s, \n" ifile ofile ;
+  (* printf "\nif: %s, of: %s, \n" ifile ofile ; *)
   List.iter (printf "cmd %s") cmd ;
   let exc = command ?stdout:output cmd in
   if exc <> 0 then begin

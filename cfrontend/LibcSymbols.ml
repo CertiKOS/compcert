@@ -264,7 +264,7 @@ let libc_list = [
   "user_regs_struct";
   (* "utimbuf"; *)
   "utmpx";
-  "utsname";
+  (* "utsname"; *)
   "winsize";
   "xdp_desc";
   "xdp_mmap_offsets";
@@ -5767,7 +5767,7 @@ let libc_list = [
   "fpathconf";
   (* "fprintf"; *)
   (* "fputc"; *)
-  "fputs";
+  (* "fputs"; *)
   (* "fread"; *)
   "fread_unlocked";
   "free";
@@ -5873,9 +5873,9 @@ let libc_list = [
   "getutxid";
   "getutxline";
   "getxattr";
-  "glob";
+  (* "glob"; *)
   "glob64";
-  "globfree";
+  (* "globfree"; *)
   "globfree64";
   "gmtime";
   "gmtime_r";
@@ -6422,7 +6422,7 @@ let libc_list = [
   "umask";
   "umount";
   "umount2";
-  "uname";
+  (* "uname"; *)
   (* "ungetc"; *)
   "unlink";
   "unlinkat";

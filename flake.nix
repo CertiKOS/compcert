@@ -40,8 +40,7 @@
         devShell = pkgs.mkShell {
           OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
-          RUST_SRC_PATH = "${rust_tc}/lib/rustlib/src/rust/library";
-          RUST_LIB_SRC = "${rust_tc}/lib/rustlib/src/rust/library";
+          RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests -Astatic_mut_refs";
           shellHook = ''
             export PATH="$PATH:$PWD"
@@ -50,13 +49,14 @@
           buildInputs = with pkgs; [
             llvmPackages_latest.clang-tools
             llvmPackages_latest.clang
+            llvmPackages_latest.openmp
+
 
             pkgs.darwin.apple_sdk.frameworks.CoreServices
             pkgs.darwin.apple_sdk.frameworks.System
             pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
             python3
             rust_tc
-            nixStable
             fenix.packages.${system}.rust-analyzer
             # rustc deps
             ninja
@@ -104,6 +104,9 @@
             # for robotsmeetkittens
             ncurses
             ncurses.dev
+            # for tmux
+            libevent
+            libevent.dev
             # coqPackages.vscoq-language-server
          ];
         };

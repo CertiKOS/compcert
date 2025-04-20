@@ -89,6 +89,8 @@ Print composite.
 Locate unary_operation.
 Print unary_operation.
 
+Print type.
+Print binary_operation.
 
 Inductive rexpr : Type :=
   | Econst_int: int -> type  -> rexpr

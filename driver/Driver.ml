@@ -19,6 +19,9 @@ open Driveraux
 open Frontend
 open Assembler
 open Linker
+open Linking
+
+
 
 let remove_c_extension path =
   let base = Filename.basename path in
@@ -136,7 +139,7 @@ let compile_c_file sourcename ifile ofile =
   | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
   ;
 
-  PrintRustLight.destination := Some "main.rs";
+  PrintRustLight.destination := Some "inserted_main_module.rs";
 
   if !main_mod_name = module_name_string then
     match
@@ -441,10 +444,14 @@ let generate_mapping unit =
                               )
                               | Some (Some (f, dfn_old)) -> (
                                   if not (comp_eq dfn dfn_old) then (
-                                    printf "\nMAYDAY %s\n" (sym |> List.to_seq |> String.of_seq);
-                                    composite_mapping := (StrMap.add sym None !composite_mapping))
+                                    if PrintRustLight.equal_sans_anonstruct dfn_old dfn then (
+                                      let (f', dfn') = PrintRustLight.get_representative dfn_old f dfn module_name in
+                                      composite_mapping := (StrMap.add sym (Some((f', dfn'))) !composite_mapping))
+                                    else
+                                      printf "\nMAYDAY NOT EQUAL %s\n" (sym |> List.to_seq |> String.of_seq);
+                                    )
                                   else (
-                                    printf "\nMAYDAY %s\n" (sym |> List.to_seq |> String.of_seq)
+                                    printf "\nMAYDAY EQUAL %s\n" (sym |> List.to_seq |> String.of_seq)
                                   )
                               )
                           )) (snd l))
@@ -606,7 +613,7 @@ let create_toml unit =
 {|
 [[bin]]
 name = "main"
-path = "./src/|} ^ "main" ^ ".rs\"")
+path = "./src/|} ^ "inserted_main_module" ^ ".rs\"")
     | None -> ""
   in
   (* TODO is there a less ugly way to do this without carrying the whitespace? *)

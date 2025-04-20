@@ -233,8 +233,8 @@ Definition print_r_program_from_cfg
   (* note: this has to go before the type casts *)
   (* since that is not idempotent. Morally speaking it really should be *)
   (* TODO I think I made this idempotent. Should double check *)
-  @@@ RustLightSplitExpr.transl_program
   @@@ RustLightInsertTypeCasts.transl_program
+  @@@ RustLightSplitExpr.transl_program
   (*@@@ RustLightModifyMain.transl_program*)
   @@ print (print_Rustlight sym_mapping composite_mapping name proj_name)
   @@@ ret.

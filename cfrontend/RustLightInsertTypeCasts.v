@@ -214,6 +214,15 @@ Definition do_binop_coersion (t1: type) (t2: type) : needs_coersion :=
   | ( Ctypes.Tlong _ _ , Ctypes.Tarray ty_inner _num attr) =>
       let target_ty := Ctypes.Tpointer ty_inner attr in
       NC_second (i2etc t2 target_ty) target_ty
+  | (Ctypes.Tarray ty num_eles _a, Ctypes.Tpointer ty' a') =>
+      let target_ty := Ctypes.Tpointer ty' a' in
+      NC_first (i2etc t1 target_ty) target_ty
+
+  |  (Ctypes.Tpointer ty' a', Ctypes.Tarray ty num_eles _a) =>
+      let target_ty := Ctypes.Tpointer ty' a' in
+      NC_second (i2etc t2 target_ty) target_ty
+
+
   | (Ctypes.Tpointer Ctypes.Tvoid _attr, (Ctypes.Tpointer ty' attr') as target_ty) =>
     match ty' with
     | Ctypes.Tvoid => NC_neither t1
@@ -242,12 +251,18 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
   | Evar id ty
   | Etempvar id ty =>
       match ty with
-      | Tarray ty' _ a => ret(Ecast e (Tpointer ty' a))
+      (*| Tarray ty' _ a => ret(Ecast e (Tpointer ty' a))*)
+      (*| Tarray ty' _ a => ret(Ecast e (Tpointer ty' a))*)
       | _ => ret(e)
       end
   | Ederef b ty =>
       do tb <- insert_cast_expr b;
-      ret(Ederef tb ty)
+      (* TODO this probably won't work for void pointers *)
+      (* which is why some sort of provenance is needed *)
+      match ty with
+      | Tfunction _ _ _ => ret (Ecast tb ty)
+      | _ => ret(Ederef tb ty)
+      end
   | Eaddrof b ty =>
       do tb <- insert_cast_expr b;
       ret(Eaddrof tb ty)
@@ -259,8 +274,15 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
       match ty with
       | Ctypes.Tint IBool _ _ =>
           let cur_ty := r_typeof exp in
-          do zero_const <- gen_zero_const cur_ty;
-          ret(Ebinop Ogt texp zero_const ty)
+          let (new_expr, new_ty) :=
+            match cur_ty with
+            | Tarray a b c =>
+                (Ecast texp (Tpointer a c), Tpointer a c)
+            | _ => (texp , cur_ty)
+          end in
+
+          do zero_const <- gen_zero_const new_ty;
+          ret(Ebinop Ogt new_expr zero_const ty)
       | _ => ret(Ecast texp ty)
       end
   (* TODO I assume that this is fine. We might need to insert a cast maybe? *)
@@ -379,6 +401,7 @@ Fixpoint insert_cast_arglist
       match r_typeof arg with
       | Ctypes.Tfloat F32 a => (Ecast arg (Ctypes.Tfloat F64 a))
       | Ctypes.Tint _ a _ => (Ecast arg bang_type)
+      | Ctypes.Tarray a b c => (Ecast arg (Tpointer a c))
       | _ => arg
       end
       in
@@ -403,7 +426,11 @@ Fixpoint insert_cast_arglist_with_ty_info
       | Tcons ty tyl' =>
       (
           do arg <- insert_cast_expr a1 ;
-          do casted_arg <- i2etc (r_typeof arg) ty arg ;
+          let decayed_arg_ty := match ty with
+            | Tarray a b c => Tpointer a c
+            | _ => ty
+          end in
+          do casted_arg <- i2etc (r_typeof arg) decayed_arg_ty arg ;
           do args <- insert_cast_arglist_with_ty_info a2 tyl';
           ret (casted_arg :: args)
       )
@@ -462,6 +489,7 @@ Fixpoint insert_cast_stmt (gvt: ident -> res type) (f_rty: type) (stmt: rstateme
           do al' <- insert_cast_arglist_with_ty_info al tyl;
           ret (S_call x (Ecast name' fnty) al')
         )
+      (* TODO handle an array here. Need to decay it or it will be wrong.*)
       | _ =>
         (
           do al' <- insert_cast_arglist al ;

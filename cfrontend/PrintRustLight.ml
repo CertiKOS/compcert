@@ -9,7 +9,7 @@ open! LibcSymbols
 exception Panic of string
 
 let todo () = failwith "\nTODO\n"
-let unimplemented () = failwith "Not yet implemented"
+let unimplemented s = failwith (Printf.sprintf "Not yet implemented %s" s)
 
 (* let a: member = todo () ;; *)
 
@@ -23,7 +23,8 @@ let remove_c_extension path =
 (* pulled from https://doc.rust-lang.org/book/appendix-01-keywords.html *)
 module StringSet = Set.Make(String)
 
-let libc_symbol_set = StringSet.of_list libc_list
+(* let libc_symbol_set = StringSet.of_list libc_list *)
+let libc_symbol_set = StringSet.of_list ["malloc"; "free"]
 
 let rust_keywords  = StringSet.of_list [
   "as";
@@ -145,6 +146,33 @@ let rec membs_equal l1 l2 =
     )
   | ([], []) -> true
   | _ -> false
+
+let equal_sans_anonstruct
+  (s1: composite_definition)
+  (s2: composite_definition)
+  : bool
+  =
+    match (s1, s2) with
+    (Composite(i1, s_or_u1, membs1, attrs1), Composite(i2, s_or_u2, membs2, attrs2)) ->(
+      i1 = i2 && s_or_u1 = s_or_u2 && attrs1 = attrs2 && membs_equal membs1 membs2
+    )
+
+let get_representative
+  (s1: composite_definition)
+  (m1: char list)
+  (s2: composite_definition)
+  (m2: char list)
+  : (char list * composite_definition)
+  =
+    match (s1, s2) with
+    (Composite(i1, s_or_u1, membs1, attrs1), Composite(i2, s_or_u2, membs2, attrs2)) ->(
+      if i1 < i2 then (m1, s1) else (m2, s2)
+    )
+
+
+
+
+
 
 let check_mod_for_extra_types
   (* ident -> (module, defn)*)
@@ -696,7 +724,7 @@ let rec print_expr fmt e =
       (* TODO go back in rustlight and make sure it's not a wild cast... *)
       | (Ctypes.Tarray(_ty_from, _, _), Ctypes.Tpointer(_ty_to, _))
         (* -> fprintf fmt "((%a).as_mut_ptr() as %s)" print_expr exp (gen_ty_rust false ty) *)
-        -> fprintf fmt "(%a).as_mut_ptr()" print_expr exp
+        -> fprintf fmt "(%a).as_mut_ptr() as %s" print_expr exp (gen_ty_rust false ty)
              (* (gen_ty_rust false _ty_from) (gen_ty_rust false _ty_to) *)
       | (Ctypes.Tfunction(_, _, _), Ctypes.Tpointer(_, _)) -> fprintf fmt "(%a as %s)" print_expr exp (gen_ty_rust false ty)
       | (Ctypes.Tstruct(a, _), Ctypes.Tstruct(b, _)) ->
@@ -1028,7 +1056,8 @@ let get_contained_typ_idents (Ctypes.Composite(id, sou, members, _))
       | Member_plain(_id, ty) ->
           (* printf "\n CONSIDERING MEMBER %s\n" (extern_atom_r _id);  *)
           extract_tys_from_ty ty @ acc
-      | Member_bitfield(_, _, _, _, _, _) -> unimplemented()
+      | Member_bitfield(bid, _, _, _, _, _) ->
+          unimplemented(extern_atom_r bid)
   ) [] members
 
 (* args match gen_imports outputs *)

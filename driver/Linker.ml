@@ -28,10 +28,11 @@ let linker exe_name files =
      then ["-L" ^ !stdlib_path; "-lcompcert"]
      else [])
   ] in
-  let exc = command cmd in
-  if exc <> 0 then begin
-    command_error "linker" exc
-  end
+  let _exc = command cmd in ()
+  (* don't need to link *)
+  (* if exc <> 0 then begin *)
+  (*   command_error "linker" exc *)
+  (* end *)
 
 
 let gnu_linker_help =

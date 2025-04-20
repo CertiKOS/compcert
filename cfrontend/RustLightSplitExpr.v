@@ -30,15 +30,15 @@ Definition expr_should_be_split (e: rexpr) : bool :=
       | _ => false
       end
   (* a reborrow is usually fine, but we want to be conservative *)
-  | Ederef e1 ty =>  true
-  | Eunop op e1 ty => true
-  | Ebinop op e1 e2 ty => true
-  | Ecast e1 ty => true
-  | Efield e1 id ty => true
-  | Esizeof t1 ty => true
-  | Ealignof t1 ty => true
-  | Enull_check e1 => true
-  | Eaddrof e1 ty => true
+  | Ederef _ _
+  | Eunop _ _ _
+  | Ebinop _ _ _ _
+  | Ecast _ _
+  | Efield _ _ _
+  | Esizeof _ _
+  | Ealignof _ _
+  | Enull_check _
+  | Eaddrof _ _ => false
   end.
 
 
@@ -143,6 +143,22 @@ Definition process_expr (expr_to_split: rexpr) (gen_stmt: rexpr -> rstatement)
       SimplExpr.ret(S_sequence stmts stmt)
   end.
 
+Print list.
+
+Fixpoint process_exprs (exprs_to_split: list rexpr) (stmts: rstatement) (exprs: list rexpr) (gen_stmt: list rexpr -> rstatement)
+  : SimplExpr.mon rstatement :=
+  match exprs_to_split with
+  | cons expr_to_split rest =>
+    gdo the_split <- split_expr expr_to_split;
+    match the_split with
+    | inl e =>
+        process_exprs rest stmts (e :: exprs) gen_stmt
+    | inr (stmts_rest, e) =>
+        process_exprs rest (S_sequence stmts_rest stmts) (e :: exprs)  gen_stmt
+    end
+  | nil => SimplExpr.ret(S_sequence stmts (gen_stmt (List.rev exprs)))
+  end.
+
 (*Fixpoint tranls_match (l : labeled_rstatement) : *)
 
 Fixpoint transl_stmt (s: rstatement) : mon rstatement :=
@@ -158,8 +174,9 @@ Fixpoint transl_stmt (s: rstatement) : mon rstatement :=
       let gen_res := fun (e: rexpr) => S_set x e in
       process_expr exp gen_res
   | S_call x name al =>
-      (* TODO this doesn't look right. Don't all the arguments need to be proccessed? and split? *)
-      ret s
+      (* TODO should still process the name *)
+      let gen_res := fun (el: list rexpr) => S_call x name el in
+      process_exprs al S_skip nil gen_res
   | S_exit exp =>
       let gen_res := fun (e: rexpr) => S_exit e in
       process_expr exp gen_res
