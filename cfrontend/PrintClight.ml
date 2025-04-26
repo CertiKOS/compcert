@@ -336,16 +336,19 @@ let string_list_to_char_list_list (str_list: string list) : char list list =
 
 (* TODO go through prog_types too and add to symbols *)
 
-let extract_symbols (prog : Clight.program)
-  : ((char List.t) List.t * ((char List.t) * Ctypes.composite_definition) List.t) =
-  let [@warning "-40"] [@warning "-42"] vars = List.filter_map
+let extract_symbols (prog : Clight.program) =
+  (* : ((AST.ident * (coq_function fundef, coq_type) AST.globdef) List.t * (AST.ident * Ctypes.composite_definition) List.t) = *)
+  let [@warning "-40"] [@warning "-42"] vars
+  = List.filter_map
       (fun (id, dfn) ->
          match dfn with
          (* can't be undefined. If it is, then it's defined in another file/external *)
-         | AST.Gvar v -> if List.length v.gvar_init > 0 then Some id else None
+         | AST.Gvar v -> if List.length v.gvar_init > 0 then Some (id, dfn) else None
          | AST.Gfun f -> (
+           (* TODO I'm pretty sure we don't care about linkage here. If it's a public function, then there can only be one*)
+           (* if it's a static function, the ident used for the other function will be different *)
              match f with
-             | Internal _ -> Some id
+             | Internal _ -> Some (id, dfn)
              | External _ -> None
            )
       )
@@ -353,7 +356,7 @@ let extract_symbols (prog : Clight.program)
   let tys =  (
     List.map
       (fun ty ->
-         (tmp_conv_fn (extern_atom (match ty with Composite (id, _, _, _) -> id)), ty))
+        match ty with Composite(id, _, _, _) -> (id, ty))
       prog.prog_types
   ) in
   (* let _ = printf "\nPTYPES HI I RAN"; List.map *)
@@ -364,4 +367,4 @@ let extract_symbols (prog : Clight.program)
   (*       ) *)
   (*   ) *)
   (*   prog.prog_types in *)
-  (string_list_to_char_list_list (List.map extern_atom vars), tys)
+  (vars, tys)

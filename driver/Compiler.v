@@ -83,15 +83,17 @@ Require Import Compopts.
 (** Pretty-printers (defined in Caml). *)
 Parameter print_Clight: Clight.program -> unit.
 Parameter print_Rustlight_main:
-  string -> string -> (RustLight.r_function * ident) -> unit.
+  (RustLight.r_function * ident) -> unit.
 
 Parameter print_Rustlight:
-  RustLight.str_map_globals
-  -> RustLight.str_map_composites
-    -> string -> string -> RustLight.r_program -> unit.
+  RustLight.r_program -> unit.
 Parameter print_clightcfg_in_ml:
   ClightCFG.clightcfg_program -> unit.
-Parameter extract_Symbols: Clight.program -> (list string * list (string * Ctypes.composite_definition)).
+Parameter extract_Symbols: Clight.program -> list (ident * AST.globdef (Ctypes.fundef Clight.function) (Ctypes.type) ) * list (ident * Ctypes.composite_definition).
+
+
+
+  (*(list string * list (string * Ctypes.composite_definition)).*)
 Parameter print_Cminor: Cminor.program -> unit.
 Parameter print_RTL: Z -> RTL.program -> unit.
 Parameter print_LTL: LTL.program -> unit.
@@ -189,7 +191,7 @@ Definition drop_rustlight (p: (Clight.program * RustLight.r_program)) : res Clig
   OK (fst p).
 
 Definition get_exports (p: Csyntax.program) :
-  res (list string * list (string * Ctypes.composite_definition)) :=
+  res (list (ident * AST.globdef (Ctypes.fundef Clight.function) (Ctypes.type) ) * list (ident * Ctypes.composite_definition)) :=
   OK p
   @@@ SimplExpr.transl_program
   @@@ (fun (p': Clight.program) => OK(extract_Symbols p')).
@@ -208,14 +210,12 @@ Definition print_clightcfg
 Locate transl_program.
 
 Definition print_r_main_from_cfg
-  (mod_name: string)
-  (proj_name: string)
   (p: Csyntax.program)
   : res (RustLight.r_function * ident)
   :=
   OK p
   @@@ RustLightModifyMain.transl_program
-  @@ print (print_Rustlight_main mod_name proj_name)
+  @@ print (print_Rustlight_main)
   @@@ ret.
 
 Definition print_r_program_from_cfg
@@ -232,11 +232,10 @@ Definition print_r_program_from_cfg
   @@@ RustLightgen.transl_program
   (* note: this has to go before the type casts *)
   (* since that is not idempotent. Morally speaking it really should be *)
-  (* TODO I think I made this idempotent. Should double check *)
+  (* TODO since last note: I think I made this idempotent. Should double check *)
   @@@ RustLightInsertTypeCasts.transl_program
   @@@ RustLightSplitExpr.transl_program
-  (*@@@ RustLightModifyMain.transl_program*)
-  @@ print (print_Rustlight sym_mapping composite_mapping name proj_name)
+  @@ print print_Rustlight
   @@@ ret.
 
 

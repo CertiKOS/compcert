@@ -156,9 +156,9 @@ Class Finite (A:Type) := {
 
 (** An alphabet is both [ComparableLeibnizEq] and [Finite]. **)
 Class Alphabet (A:Type) := {
-  AlphabetComparable :> Comparable A;
-  AlphabetComparableLeibnizEq :> ComparableLeibnizEq AlphabetComparable;
-  AlphabetFinite :> Finite A
+  AlphabetComparable :: Comparable A;
+  AlphabetComparableLeibnizEq :: ComparableLeibnizEq AlphabetComparable;
+  AlphabetFinite :: Finite A
 }.
 
 (** The [Numbered] class provides a conveniant way to build [Alphabet] instances,

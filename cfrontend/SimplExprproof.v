@@ -51,7 +51,7 @@ Let tge := Clight.globalenv tprog.
 Lemma comp_env_preserved:
   Clight.genv_cenv tge = Csem.genv_cenv ge.
 Proof.
-  simpl. destruct TRANSL. generalize (prog_comp_env_eq tprog) (prog_comp_env_eq prog). 
+  simpl. destruct TRANSL. generalize (prog_comp_env_eq tprog) (prog_comp_env_eq prog).
   congruence.
 Qed.
 
@@ -109,14 +109,14 @@ Proof.
   intros. unfold Ederef'; destruct a; auto using eval_Ederef.
   destruct (type_eq t (typeof a)); auto using eval_Ederef.
   inv H.
-- auto. 
+- auto.
 - inv H0.
 Qed.
 
 Lemma typeof_Ederef':
   forall a t, typeof (Ederef' a t) = t.
 Proof.
-  unfold Ederef'; intros; destruct a; auto. destruct (type_eq t (typeof a)); auto. 
+  unfold Ederef'; intros; destruct a; auto. destruct (type_eq t (typeof a)); auto.
 Qed.
 
 Lemma eval_Eaddrof':
@@ -132,7 +132,7 @@ Qed.
 Lemma typeof_Eaddrof':
   forall a t, typeof (Eaddrof' a t) = t.
 Proof.
-  unfold Eaddrof'; intros; destruct a; auto. destruct (type_eq t (typeof a)); auto. 
+  unfold Eaddrof'; intros; destruct a; auto. destruct (type_eq t (typeof a)); auto.
 Qed.
 
 Lemma eval_make_normalize:
@@ -145,7 +145,7 @@ Proof.
   intros. unfold make_normalize, bitfield_normalize.
   assert (bitsize_intsize sz <= Int.zwordsize) by (destruct sz; compute; congruence).
   destruct (intsize_eq sz IBool || signedness_eq sg Unsigned).
-- rewrite Int.zero_ext_and by lia. econstructor. eauto. econstructor. 
+- rewrite Int.zero_ext_and by lia. econstructor. eauto. econstructor.
   rewrite H1; simpl. unfold sem_and, sem_binarith.
   assert (A: exists sg2, classify_binarith (Tint sz sg1 attr) type_int32s = bin_case_i sg2).
   { unfold classify_binarith. unfold type_int32s. destruct sz, sg1; econstructor; eauto. }
@@ -261,7 +261,7 @@ Proof.
     replace co' with co in * by congruence.
     split; auto. apply co_consistent_complete.
     eapply build_composite_env_consistent. eapply prog_comp_env_eq. eauto.
-  } 
+  }
   induction 1; simpl; auto.
 - rewrite H0. intros (co' & delta' & E1 & E2). rewrite comp_env_preserved in H2.
   exploit A; eauto. intros (E3 & E4). subst co'.
@@ -339,7 +339,7 @@ Opaque makeif.
   subst sl1; simpl.
   assert (eval_expr tge e le m (Eaddrof' a1 ty) (Vptr b ofs)) by (apply eval_Eaddrof'; auto).
   assert (typeof (Eaddrof' a1 ty) = ty) by (apply typeof_Eaddrof').
-  destruct dst; auto. simpl; econstructor; eauto.  
+  destruct dst; auto. simpl; econstructor; eauto.
 - (* unop *)
   exploit H0; eauto. intros [A [B C]].
   subst sl1; simpl.
@@ -377,7 +377,7 @@ Opaque makeif.
     rewrite symbols_preserved; auto.
 - (* deref *)
   exploit H0; eauto. intros [A [B C]]. subst sl1.
-  split; auto. split. rewrite typeof_Ederef'; auto. apply eval_Ederef'; auto. 
+  split; auto. split. rewrite typeof_Ederef'; auto. apply eval_Ederef'; auto.
 - (* field struct *)
   rewrite <- comp_env_preserved in *.
   exploit H0; eauto. intros [A [B C]]. subst sl1.
@@ -544,11 +544,11 @@ Ltac UNCHANGED :=
   inv H1.
 + (* for effects *)
   exploit H0; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [R S]]]]]]]].
-  TR. eauto. auto. 
+  TR. eauto. auto.
   intros. econstructor; eauto.
 + (* generic *)
   exploit H0; eauto. intros [dst' [sl1' [sl2' [a' [tmp' [P [Q [R S]]]]]]]].
-  TR. subst sl1. rewrite app_ass. eauto. auto. 
+  TR. subst sl1. rewrite app_ass. eauto. auto.
   intros. rewrite <- app_ass. econstructor; eauto.
 - (* seqand *)
   inv H1.
@@ -872,7 +872,7 @@ Proof.
   destruct (Mem.weak_valid_pointer m1 b (Ptrofs.unsigned i)); inv H.
   destruct (Mem.weak_valid_pointer m2 b (Ptrofs.unsigned i)); inv H0.
   auto.
-- destruct v; try congruence. 
+- destruct v; try congruence.
   destruct (negb Archi.ptr64); try discriminate.
   destruct (Mem.weak_valid_pointer m1 b (Ptrofs.unsigned i)); inv H.
   destruct (Mem.weak_valid_pointer m2 b (Ptrofs.unsigned i)); inv H0.
@@ -1004,7 +1004,7 @@ Proof.
   auto.
   (* volatile *)
   intros.
-  exploit is_bitfield_access_sound; eauto. intros EQ; subst bf0. 
+  exploit is_bitfield_access_sound; eauto. intros EQ; subst bf0.
   exists (PTree.set t0 v le); split.
   simpl. eapply star_two. econstructor. eapply step_make_set; eauto. traceEq.
   split. constructor. apply PTree.gss.
@@ -1111,7 +1111,7 @@ Lemma match_cont_is_call_cont:
   forall ce', match_cont ce' k tk.
 Proof.
   destruct 1; simpl; intros; try contradiction; econstructor; eauto.
-Qed. 
+Qed.
 
 Lemma match_cont_call_cont:
   forall ce k tk,
@@ -1814,14 +1814,14 @@ Ltac NOTIN :=
   subst; simpl Kseqlist.
   econstructor; split.
   left. eapply plus_left. constructor.
-  eapply star_left. constructor. econstructor. eauto. rewrite <- TY2; eauto. 
+  eapply star_left. constructor. econstructor. eauto. rewrite <- TY2; eauto.
   eapply star_left. constructor.
   apply star_one. eapply step_make_assign; eauto.
-  constructor. apply PTree.gss. simpl. eapply cast_idempotent; eauto. 
+  constructor. apply PTree.gss. simpl. eapply cast_idempotent; eauto.
   reflexivity. reflexivity. traceEq.
   econstructor; eauto. apply S.
   apply tr_val_gen. rewrite typeof_make_assign_value; auto.
-  intros. eapply make_assign_value_sound; eauto. 
+  intros. eapply make_assign_value_sound; eauto.
   constructor. rewrite H4; auto. apply PTree.gss.
   intros. apply PTree.gso. intuition congruence.
   auto.
@@ -2369,7 +2369,7 @@ Proof.
   rewrite H6; rewrite H7. eapply alloc_variables_preserved; eauto.
   rewrite H6. eapply bind_parameters_preserved; eauto.
   eauto.
-  econstructor; eauto. 
+  econstructor; eauto.
 
 - (* external function *)
   inv TR.
@@ -2411,8 +2411,8 @@ Proof.
   econstructor.
   eapply (Genv.init_mem_match (proj1 TRANSL)); eauto.
   replace (prog_main tprog) with (prog_main prog).
-  rewrite symbols_preserved. eauto. 
-  destruct TRANSL. destruct H as (A & B & C). simpl in B. auto. 
+  rewrite symbols_preserved. eauto.
+  destruct TRANSL. destruct H as (A & B & C). simpl in B. auto.
   eexact FIND.
   rewrite <- H3. eapply type_of_fundef_preserved; eauto.
   econstructor; eauto. intros; constructor.
@@ -2442,7 +2442,7 @@ End PRESERVATION.
 
 Global Instance TransfSimplExprLink : TransfLink match_prog.
 Proof.
-  red; intros. eapply Ctypes.link_match_program_gen; eauto. 
+  red; intros. eapply Ctypes.link_match_program_gen; eauto.
 - intros.
 Local Transparent Linker_fundef.
   simpl in *; unfold link_fundef in *. inv H3; inv H4; try discriminate.

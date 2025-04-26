@@ -2,7 +2,7 @@
   description = "nix shell";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/master";
+    nixpkgs.url = "github:DieracDelta/nixpkgs/jr/coqfmt";
     utils.url = "github:numtide/flake-utils";
     fenix = {
       url = "github:nix-community/fenix";
@@ -65,36 +65,37 @@
             zlib
             openssl
 
-            coqPackages_8_19.coq.ocamlPackages.core
-            coqPackages_8_19.coq.ocamlPackages.dune_2
-            coqPackages_8_19.coq.ocamlPackages.findlib
-            # coqPackages_8_19.coq.ocamlPackages.utop
-            coqPackages_8_19.coq.ocamlPackages.cryptokit
-            coqPackages_8_19.coq.ocamlPackages.ocamlbuild
-            coqPackages_8_19.coq.ocamlPackages.cppo
-            coqPackages_8_19.coq.ocamlPackages.extlib
-            coqPackages_8_19.coq.ocamlPackages.yojson
-            coqPackages_8_19.coq.ocamlPackages.zarith
+            coqPackages_8_20.coq.ocamlPackages.core
+            coqPackages_8_20.coq.ocamlPackages.dune_2
+            coqPackages_8_20.coq.ocamlPackages.findlib
+            # coqPackages_8_20.coq.ocamlPackages.utop
+            coqPackages_8_20.coq.ocamlPackages.cryptokit
+            coqPackages_8_20.coq.ocamlPackages.ocamlbuild
+            coqPackages_8_20.coq.ocamlPackages.cppo
+            coqPackages_8_20.coq.ocamlPackages.extlib
+            coqPackages_8_20.coq.ocamlPackages.yojson
+            coqPackages_8_20.coq.ocamlPackages.zarith
 
-            coqPackages_8_19.coq.ocamlPackages.ocaml
-            coqPackages_8_19.coq.ocamlPackages.menhir
-            coqPackages_8_19.coq.ocamlPackages.menhirLib
-            coqPackages_8_19.coq.ocamlPackages.merlin
-            # coqPackages_8_19.coq.ocamlPackages.utop
-            coqPackages_8_19.coq.ocamlPackages.ocp-indent
-            coqPackages_8_19.coq.ocamlPackages.ocaml-lsp
-            coqPackages_8_19.coq.ocamlPackages.dot-merlin-reader
-            coqPackages_8_19.coq.ocamlPackages.ocamlformat
-            coqPackages_8_19.coq.ocamlPackages.ocamlgraph
-            coqPackages_8_19.coq-lsp
+            coqPackages_8_20.coq.ocamlPackages.ocaml
+            coqPackages_8_20.coq.ocamlPackages.menhir
+            coqPackages_8_20.coq.ocamlPackages.menhirLib
+            coqPackages_8_20.coq.ocamlPackages.merlin
+            # coqPackages_8_20.coq.ocamlPackages.utop
+            coqPackages_8_20.coq.ocamlPackages.ocp-indent
+            coqPackages_8_20.coq.ocamlPackages.ocaml-lsp
+            coqPackages_8_20.coq.ocamlPackages.dot-merlin-reader
+            coqPackages_8_20.coq.ocamlPackages.ocamlformat
+            coqPackages_8_20.coq.ocamlPackages.ocamlgraph
+            coqPackages_8_20.coq-lsp
+            coqPackages_8_20.coqfmt
 
             # ocaml-ng.ocamlPackages_4_10.ocaml-lsp
-            # coqPackages_8_19.coq.ocamlPackages.ocamlformat
+            # coqPackages_8_20.coq.ocamlPackages.ocamlformat
 
             # ocamlPackages_4_12.menhir
-            # coqPackages_8_19.coqhammer
+            # coqPackages_8_20.coqhammer
             # coqPackages_8_12.smtcoq
-            coq_8_19
+            coq_8_20
             pkg-config
             just
             typst

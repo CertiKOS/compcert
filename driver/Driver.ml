@@ -19,7 +19,7 @@ open Driveraux
 open Frontend
 open Assembler
 open Linker
-open Linking
+open! Linking
 
 
 
@@ -27,8 +27,8 @@ let remove_c_extension path =
   let base = Filename.basename path in
   Filename.chop_extension base
 
+(* TODO this is the start of converting an irreducible graph to a reducible graph *)
 (* open Graph *)
-(* open Camlcoq *)
 
 (* module Vertex = struct *)
 (*   type t = Camlcoq.P.t *)
@@ -82,6 +82,8 @@ let main_mod_name : string ref = ref ""
 (* Optional sdump suffix *)
 let sdump_suffix = ref ".json"
 
+let linker : Linking.t ref = ref (Linking.create ())
+
 let nolink () =
   !option_c || !option_S || !option_E || !option_interp
 
@@ -120,9 +122,7 @@ let compile_c_file sourcename ifile ofile =
   set_dest Regalloc.destination_alloctrace option_dalloctrace ".alloctrace";
   set_dest PrintLTL.destination option_dltl ".ltl";
   set_dest PrintMach.destination option_dmach ".mach";
-  (*  TODO add in pass for drust*)
   set_dest AsmToJSON.destination option_sdump !sdump_suffix;
-  (* Parse the ast *)
 
   let module_name_string = remove_c_extension sourcename in
   let module_name =  module_name_string |> String.to_seq |> List.of_seq in
@@ -132,6 +132,10 @@ let compile_c_file sourcename ifile ofile =
   let project_name = !option_drustlight_name |> String.to_seq |> List.of_seq in
 
   (* TODO(tech debt) project name no longer needed here. Remove it *)
+
+  PrintRustLight.proj_name := Some !option_drustlight_name;
+  PrintRustLight.mod_name := Some module_name_string;
+
   match
     (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name (project_name) csyntax)
   with
@@ -143,13 +147,12 @@ let compile_c_file sourcename ifile ofile =
 
   if !main_mod_name = module_name_string then
     match
-    (Compiler.print_r_main_from_cfg module_name project_name csyntax) with
+    (Compiler.print_r_main_from_cfg csyntax) with
     | Errors.OK _ -> printf "created generated main function and module"
     | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
     ;
 
-
-
+  (* TODO this goes in the garbage*)
   (* Convert to Asm *)
   (* this calls out to compiler.v::transf_c_program*)
   (* which calls transf_clight_program *)
@@ -423,42 +426,14 @@ let generate_mapping unit =
        let module_name = String.sub file_name 0 ((String.length file_name) - 2) |> String.to_seq |> List.of_seq in
        let glob_list = extract_globals file_name in
        (match glob_list with
-        | Errors.OK l -> (List.iter
-                           (fun symbol -> sym_mapping := StrMap.add symbol module_name !sym_mapping;) (fst l) ;
-                          List.iter (fun (sym, dfn) -> (
-                              match StrMap.find sym !composite_mapping with
-                              (* first occurence *)
-                              | None ->
-                                (
-                                  printf "\nMAYDAY ADDS %s\n" (sym |> List.to_seq |> String.of_seq);
-                                  composite_mapping := StrMap.add sym (Some((module_name, dfn))) !composite_mapping;
-                                )
-                              (* HACK this is morally wrong. Instead: switch this out to a list of (name, module).
-                                 that way, we'll know (from prog_types) which one to use
-                               *)
-                              | Some (None) -> (
-
-                                printf "\nMAYDAY GG %s\n" (sym |> List.to_seq |> String.of_seq);
-                                printf "UUID explicitly setting to NONE\n"; ()
-
-                              )
-                              | Some (Some (f, dfn_old)) -> (
-                                  if not (comp_eq dfn dfn_old) then (
-                                    if PrintRustLight.equal_sans_anonstruct dfn_old dfn then (
-                                      let (f', dfn') = PrintRustLight.get_representative dfn_old f dfn module_name in
-                                      composite_mapping := (StrMap.add sym (Some((f', dfn'))) !composite_mapping))
-                                    else
-                                      printf "\nMAYDAY NOT EQUAL %s\n" (sym |> List.to_seq |> String.of_seq);
-                                    )
-                                  else (
-                                    printf "\nMAYDAY EQUAL %s\n" (sym |> List.to_seq |> String.of_seq)
-                                  )
-                              )
-                          )) (snd l))
+        | Errors.OK (lvars, ltyps) ->
+            List.fold_left (fun () (id, defn) -> Linking.add_globdef !linker ~name:id ~mod_name:(module_name |> List.to_seq |> String.of_seq) ~defn) () lvars;
+            List.fold_left (fun () (id, cd) -> Linking.add_ty_defn !linker ~mod_name:(module_name |> List.to_seq |> String.of_seq) ~cd) () ltyps
         | Errors.Error _ -> printf "ERROR making mapping!"; ())
 
-    ) !list_c_files
-  (* print_hashtbl !sym_mapping; *)
+    ) !list_c_files;
+    Linking.fill_out_rep_types !linker
+
 
 let cmdline_actions =
   let f_opt name ref =

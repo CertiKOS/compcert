@@ -59,7 +59,5 @@ val add_search_dir: string -> unit
 val perform_actions: unit -> string list
   (** Perform actions *)
 
-module StringSet : Set.S with type elt = string
-
-val search_dir_set: StringSet.t ref
-val include_dir_set: StringSet.t ref
+val search_dir_set: Linking.StringSet.t ref
+val include_dir_set: Linking.StringSet.t ref

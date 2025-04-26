@@ -294,6 +294,10 @@ let temp_name (id: AST.ident) =
 
 let destination : string option ref = ref None
 
+let mod_name : string option ref = ref None
+
+let proj_name : string option ref = ref None
+
 let name_inttype_rust sz sg =
   match sz, sg with
   | I8, Signed -> "core::ffi::c_schar"
@@ -512,10 +516,10 @@ let string_of_init fmt id (expected_length: int option) =
 let print_globvar fmt tds id v =
   let name_bare = extern_atom_r id in
   let linkage = if C2C.atom_is_static id then "" else "pub " in
-  (* need to do static analysis pass to conclude that this is actually static mut *)
+  (* NOTE: *)
   (* in rust, const a : u32 = 5; ensure (with the compiler) that a is not writable. Ever *)
   (* in c, const int a = 5; void f(){ *(&a) = 6; } works just fine*)
-  (* TODO not sure if this is, however, UB *)
+  (* This *IS* UB *)
 
   let name = linkage^"static mut "^name_bare in
   match v.gvar_init with
@@ -1379,12 +1383,12 @@ let rec print_prog_types prog_types mod_name =
   | nil -> ()
 
 let print_main
-  (clunky_mod_name: char list)
-  (clunky_project_name: char list)
+  (* (clunky_mod_name: char list) *)
+  (* (clunky_project_name: char list) *)
   ((rfn, new_main_ident): (r_function * ident) )
   =
-    let mod_name = List.to_seq clunky_mod_name |> String.of_seq in
-    let project_name = List.to_seq clunky_project_name |> String.of_seq in
+    let mod_name = todo() in
+    let project_name = todo() in
     match !destination with
     | None -> printf "MISSING DEST FOR %s" mod_name
     | Some f ->
@@ -1403,34 +1407,21 @@ let print_main
 
 
 let print_if
-  (clunky_sym_mapping: str_map_globals)
-  (clunky_composite_mapping: str_map_composites)
-  (clunky_mod_name: char list)
-  (clunky_project_name: char list)
+  (* (clunky_mod_name: char list) *)
+  (* (clunky_project_name: char list) *)
   (prog: r_program) =
-    let mod_name = List.to_seq clunky_mod_name |> String.of_seq in
-    let project_name = List.to_seq clunky_project_name |> String.of_seq in
-    match !destination with
-    | None -> printf "MISSING DEST FOR %s" mod_name
-    | Some f ->
-      (* We need ocaml strings to print out variable names. *)
-      (* We should do that all at once to avoid repeatedly converting. *)
-      (* Since we have to iterate over all the data anyway, might as well convert *)
-      (* to a more efficient representation *)
-      let sym_mapping = fix_mapping_types clunky_sym_mapping in
-      let composite_mapping = fix_mapping_types_2 clunky_composite_mapping in
-      (* printf "\nUUID mod_name %s\n" mod_name; *)
-      (* let len_mapping = Hashtbl.length mapping in *)
-      printf "UUID hashtbl";
-      pretty_print_hashtbl composite_mapping;
-      "./" ^ project_name ^ "/src/" |> change_directory;
-      (* printf "DOIN opening out: %s\n" f; *)
-      let oc = open_out f in
-      (* printf "DOING success opening out\n"; *)
-      (* printf "PROG TYPES"; *)
-      print_prog_types prog.prog_types mod_name;
+    (* let mod_name = List.to_seq clunky_mod_name |> String.of_seq in *)
+    (* let project_name = List.to_seq clunky_project_name |> String.of_seq in *)
+    match (!destination, !proj_name, !mod_name) with
+    | (Some f, Some project_name, Some mod_name) ->
+      (* printf "UUID hashtbl"; *)
+      (* pretty_print_hashtbl composite_mapping; *)
 
-      (* printf "END PROG TYPES"; *)
-      print_program sym_mapping composite_mapping mod_name (formatter_of_out_channel oc) prog project_name;
+      (* TODO uncomment*)
+      "./" ^ project_name ^ "/src/" |> change_directory;
+      let oc = open_out f in
+      print_prog_types prog.prog_types mod_name;
+      print_program (todo()) (todo()) (todo()) (formatter_of_out_channel oc) prog project_name;
       close_out oc;
       change_directory "../..";
+    | _ -> printf "METADATA IS MISSING, can't print."

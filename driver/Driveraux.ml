@@ -14,8 +14,8 @@
 open Printf
 open Clflags
 open Diagnostics
+open Linking
 
-module StringSet = Set.Make(String)
 (* TODO is there a cleaner way to do this that does not involve global variables? *)
 (* TODO rename this is misleadingly named. This is -l libname *)
 let search_dir_set : StringSet.t ref = ref (StringSet.empty)
