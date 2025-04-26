@@ -6,9 +6,9 @@ open Camlcoq (*for extern_atom*)
 open! Ctypes
 open RustLight
 
-module StringSet = Set.Make(String)
+let unimplemented s = failwith (Printf.sprintf "Not yet implemented %s" s)
 
-let todo () : atom = failwith "\nTODO\n"
+module StringSet = Set.Make(String)
 
 let rust_keywords  = StringSet.of_list [
   "as";
@@ -81,6 +81,13 @@ module TySet =
     let compare = Stdlib.compare
   end)
 
+module ImportSet =
+  Set.Make
+  (struct
+    type t = (string option * ident)
+    let compare = Stdlib.compare
+  end)
+
 
 (* strings -> module name *)
 module Linking : sig
@@ -90,7 +97,7 @@ module Linking : sig
 
 
   (* resolves an ident to the string it represents *)
-  val ident_to_string: t -> name : ident -> string
+  val ident_to_string: name : ident -> string
 
   (* TODO consider the case when we have two types with the same name or same identifier*)
   val is_anon_ident : t -> name : ident -> bool
@@ -139,7 +146,7 @@ end =
     }
 
 
-    let ident_to_string (state: t) ~name =
+    let ident_to_string ~name =
       let res = Hashtbl.find string_of_atom name in
       (* let _ = printf "NAMEVAR: %s\n" res in *)
       if res = "main" then "main_inner" else(
@@ -149,23 +156,23 @@ end =
 
     let dump_rep_ty_table (state: t) unit =
       Printf.printf "Begininning dump r_ty_map: \n";
-      Hashtbl.iter (fun (m_1, ty_1) (m_2, ty_2) -> Printf.printf "\t module %s, ty %s (%ld) -> module %s, ty %s (%ld)\n" (ident_to_string state ~name:ty_1) m_1 (ty_1 |> P.to_int32) m_2 (ident_to_string state ~name:ty_2) (ty_2 |> P.to_int32)) state.r_ty_map;
+      Hashtbl.iter (fun (m_1, ty_1) (m_2, ty_2) -> Printf.printf "\t module %s, ty %s (%ld) -> module %s, ty %s (%ld)\n" (ident_to_string ~name:ty_1) m_1 (ty_1 |> P.to_int32) m_2 (ident_to_string ~name:ty_2) (ty_2 |> P.to_int32)) state.r_ty_map;
       Printf.printf "Ending dump r_ty_map: \n";
       flush stdout
 
     let dump_tylist (state: t) unit =
       Printf.printf "Begininning dump type_map: \n";
-      Hashtbl.iter (fun (m, ty_uid) v -> Printf.printf "mod %s, ty %s (%ld)\n" m (ident_to_string state ~name:ty_uid) (ty_uid |> P.to_int32)) state.type_map;
+      Hashtbl.iter (fun (m, ty_uid) v -> Printf.printf "mod %s, ty %s (%ld)\n" m (ident_to_string ~name:ty_uid) (ty_uid |> P.to_int32)) state.type_map;
       Printf.printf "Ending dump type_map: \n";
       flush stdout
 
     let print_rep_set (state: t) (s: TySet.t) =
-      TySet.fold (fun (m, ty_uid) acc -> Printf.sprintf "%s (%s, %s (%ld))," acc m (ident_to_string state ~name:ty_uid) (ty_uid |> P.to_int32)) s ""
+      TySet.fold (fun (m, ty_uid) acc -> Printf.sprintf "%s (%s, %s (%ld))," acc m (ident_to_string ~name:ty_uid) (ty_uid |> P.to_int32)) s ""
 
     let dump_rep_types (state: t) =
       Printf.printf "Begininning dump rep_types: \n";
       Hashtbl.iter (fun (m, ty_uid) s ->
-        Printf.printf "\t (%s, %s (%ld)) -> {%s}\n" m (ident_to_string state ~name:ty_uid) (ty_uid |> P.to_int32) (print_rep_set state s)
+        Printf.printf "\t (%s, %s (%ld)) -> {%s}\n" m (ident_to_string ~name:ty_uid) (ty_uid |> P.to_int32) (print_rep_set state s)
     ) state.rep_types;
       Printf.printf "ending dump rep_types: \n";
       flush stdout
@@ -178,7 +185,7 @@ end =
 
     (* TODO this is a HACK. Really this information should be propagated through the parser *)
     let is_anon_ident (state: t) ~name =
-      let name_string = ident_to_string state ~name in
+      let name_string = ident_to_string ~name in
       let len = String.length name_string in
       let rec check_digits i =
         if i = len then true
@@ -306,7 +313,7 @@ end =
             Hashtbl.remove state.rep_types tid;
             Printf.printf"after removal \n";
             dump_rep_types state;
-            Printf.printf "TID1 %s %ld, TID2 is %s %ld \n" (ident_to_string state ~name:(snd tid)) (tid |> snd |> P.to_int32) (ident_to_string state ~name:(snd tid2)) (snd tid2 |> P.to_int32);
+            Printf.printf "TID1 %s %ld, TID2 is %s %ld \n" (ident_to_string ~name:(snd tid)) (tid |> snd |> P.to_int32) (ident_to_string ~name:(snd tid2)) (snd tid2 |> P.to_int32);
 
             flush stdout;
 
@@ -353,7 +360,7 @@ end =
 module Imports : sig
   type t
 
-  val create: l: Linking.t -> r_prog: RustLight.r_program -> name: string -> t
+  val create: l: Linking.t -> r_prog: RustLight.r_program -> mod_name: string -> t
 
   (* val get_extern_typs: t -> string list *)
 
@@ -371,23 +378,25 @@ end = struct
   type t = {
     linking: Linking.t;
     r_prog: RustLight.r_program;
-    imports: (string, IdentSet.t) Hashtbl.t;
-    extern_typs: IdentSet.t;
-    in_module_composite_dfns: IdentSet.t;
-    name: string;
+    (* module name -> (identifier, name to import as) set*)
+    imports: (string, ImportSet.t) Hashtbl.t;
+    mutable extern_typs: IdentSet.t;
+    mutable in_module_composite_dfns: IdentSet.t;
+    mod_name: string;
   }
 
-  let create ~l ~r_prog ~name =
+  let create ~l ~r_prog ~mod_name =
     {
       linking = l;
       r_prog;
       imports = Hashtbl.create 8;
       extern_typs = IdentSet.empty;
       in_module_composite_dfns = IdentSet.empty;
-      name;
+      mod_name;
     }
 
-  (* let get_extern_typs state = todo() *)
+  (* let get_extern_typs state =  *)
+
   (**)
   (* let get_imports state = todo() *)
   (**)
@@ -396,7 +405,7 @@ end = struct
   let identset_of_positivetree (tree: PositiveSet.t) =
     tree |> PositiveSet.elements |> IdentSet.of_list
 
-  (* gather composite types from program *)
+  (* gather composite types in use from program *)
   let get_used_composite_tys_from_prog state =
     List.fold_left (
       fun acc (elt: AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) ->
@@ -409,6 +418,112 @@ end = struct
             IdentSet.union acc (r_used_types |> identset_of_positivetree)
         | _ -> acc
     ) IdentSet.empty state.r_prog.prog_defs
+
+
+  (* iterate through all types in prog_types *)
+  (* if type is a representative type from different module *)
+  (*   add to in_module_composite_definitions *)
+  (* if not repr type: link against that type by adding to imports *)
+  let get_in_module_composite_typs (state: t) =
+    List.iter (fun (Composite(id, _, _, _) as cd: composite_definition) ->
+      let ty_id = (state.mod_name, id) in
+
+      (* if type is a representative type from different module *)
+      let (rep_tyuid, _) = Linking.get_rep_type_definition state.linking ~ty_id in
+
+
+      (* if the representative type is in this module: this is fine *)
+      if rep_tyuid = ty_id then
+        state.in_module_composite_dfns <- IdentSet.add (snd ty_id) state.in_module_composite_dfns
+      else
+        let (rep_mod, rep_uid) = rep_tyuid in
+        let rep_name = Linking.ident_to_string ~name:rep_uid in
+        let ty_name = Linking.ident_to_string ~name:id in
+        let maybe_name = if rep_name = ty_name then None else Some(ty_name) in
+        let ele = (maybe_name, id) in
+        match Hashtbl.find_opt state.imports rep_mod with
+        | Some(old_hs) ->
+            let new_hs = ImportSet.add ele old_hs in
+            Hashtbl.replace state.imports rep_mod new_hs
+        | None -> Hashtbl.replace state.imports rep_mod (ImportSet.singleton ele)
+    ) state.r_prog.prog_types
+
+
+  let rec extract_tys_from_ty ty =
+    match ty with
+    | Tstruct(id, _)
+    | Tunion(id, _) ->
+        (* printf "extracted %s" (extern_atom_r id);  *)
+        [id]
+    | Tarray(ty, _, _)
+    | Tpointer(ty, _) -> extract_tys_from_ty ty
+    | Tfunction(tl, ty, _) ->
+        extract_tys_from_ty ty @ extract_tys_from_tl tl
+    | _ -> []
+  and extract_tys_from_tl tl =
+    match tl with
+    | Tnil -> []
+    | Tcons(ty, tl') -> (extract_tys_from_ty ty) @ (extract_tys_from_tl tl')
+
+
+  let get_contained_typ_idents (Ctypes.Composite(id, sou, members, _))
+  =
+    List.fold_left (
+      fun acc ele ->
+        match ele with
+        | Member_plain(_id, ty) ->
+            (* printf "\n CONSIDERING MEMBER %s\n" (extern_atom_r _id);  *)
+            extract_tys_from_ty ty @ acc
+        | Member_bitfield(bid, _, _, _, _, _) ->
+            unimplemented(Linking.ident_to_string ~name:bid)
+    ) [] members |> IdentSet.of_list
+
+  let ident_already_exists (state: t) (id: ident) =
+    let ident_name = Linking.ident_to_string ~name:id in
+    (* TODO this can be optimized incredibly easy. Very slow as is. *)
+    let is_imported =
+      (* short circuit is necessary because we just wanna flip through them all if it's true *)
+      Hashtbl.fold (fun _ is acc ->
+        acc ||
+        (ImportSet.fold (fun (name, id) acc ->
+          acc || match name with None -> (Linking.ident_to_string ~name:id) = ident_name | Some(name) -> name = ident_name
+        ) is false)
+      ) state.imports false in
+    let is_defined = IdentSet.mem id state.in_module_composite_dfns in
+    not is_imported && not is_defined
+
+
+  (* returns type idents in the struct that are used but also not in imports or in_module_composite_dfns *)
+  let get_used_tys (state: t) (cd: composite_definition) =
+    get_contained_typ_idents cd |> IdentSet.filter (ident_already_exists state)
+
+
+  let set_extern_typs_from_in_module_composite_defns (state: t) =
+    IdentSet.iter (fun ty_id ->
+      let cd = Linking.get_type_definition state.linking ~ty_id:(state.mod_name, ty_id) in
+      let used_typs = get_used_tys state cd in
+
+      (* these have to be extern. They aren't defined types in the module. *)
+      state.extern_typs <- IdentSet.union state.extern_typs used_typs
+
+    ) state.in_module_composite_dfns
+
+  let set_extern_typs_from_used_types (state: t) (ids: IdentSet.t) =
+    IdentSet.iter (fun ele ->
+      if (ident_already_exists state ele) |> not then
+        state.extern_typs <- IdentSet.add ele state.extern_typs
+  ) ids
+
+  let all_used_typs_in_module (state: t) =
+    let used_tys_in_fns = get_used_composite_tys_from_prog state in
+    set_extern_typs_from_in_module_composite_defns state;
+    ()
+
+  let gen_metadata (state: t) =
+    get_in_module_composite_typs state;
+    all_used_typs_in_module state;
+    ()
+
 
 
   (* let get_defined_in_module_tys_from_prog state = *)
