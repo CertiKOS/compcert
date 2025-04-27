@@ -362,6 +362,8 @@ module Imports : sig
 
   val create: l: Linking.t -> r_prog: RustLight.r_program -> mod_name: string -> t
 
+  val gen_metadata: t -> unit
+
   (* val get_extern_typs: t -> string list *)
 
   (* module, name, definition *)
@@ -440,7 +442,7 @@ end = struct
         let rep_name = Linking.ident_to_string ~name:rep_uid in
         let ty_name = Linking.ident_to_string ~name:id in
         let maybe_name = if rep_name = ty_name then None else Some(ty_name) in
-        let ele = (maybe_name, id) in
+        let ele = (maybe_name, rep_uid) in
         match Hashtbl.find_opt state.imports rep_mod with
         | Some(old_hs) ->
             let new_hs = ImportSet.add ele old_hs in
@@ -508,7 +510,21 @@ end = struct
 
     ) state.in_module_composite_dfns
 
+  let dump_identset (label: string) (set: IdentSet.t) =
+    Printf.printf "Beginning dump %s:\n" label;
+    IdentSet.iter
+      (fun id ->
+        let id_str = Linking.ident_to_string ~name:id in
+        let id_num = P.to_int32 id in
+        Printf.printf "\t%s (%ld)\n" id_str id_num
+      )
+      set;
+    Printf.printf "Ending dump %s.\n" label;
+    flush stdout
+
   let set_extern_typs_from_used_types (state: t) (ids: IdentSet.t) =
+    dump_identset "DUMPING IDETN SETTT\n\n\n" ids;
+    Printf.printf "PROCESSSING ";
     IdentSet.iter (fun ele ->
       if (ident_already_exists state ele) |> not then
         state.extern_typs <- IdentSet.add ele state.extern_typs
@@ -516,55 +532,64 @@ end = struct
 
   let all_used_typs_in_module (state: t) =
     let used_tys_in_fns = get_used_composite_tys_from_prog state in
+    set_extern_typs_from_used_types state used_tys_in_fns;
     set_extern_typs_from_in_module_composite_defns state;
     ()
+
+
+  let dump_imports (state: t) =
+    Printf.printf "Begininning dump imports:\n";
+    Hashtbl.iter
+      (fun m import_set ->
+        Printf.printf "\tModule %s imports:\n" m;
+        ImportSet.iter
+          (fun (alias_opt, id) ->
+            let id_str = Linking.ident_to_string ~name:id in
+            match alias_opt with
+            | Some alias ->
+              Printf.printf "\t\t%s as %s\n" id_str alias
+            | None ->
+              Printf.printf "\t\t%s\n" id_str
+          )
+          import_set
+      )
+      state.imports;
+    Printf.printf "Ending dump imports.\n";
+    flush stdout
+
+  let dump_externs (state: t) =
+    Printf.printf "Begininning dump extern_typs:\n";
+    IdentSet.iter
+      (fun id ->
+        let id_str = Linking.ident_to_string ~name:id in
+        let id_num = id |> P.to_int32 in
+        Printf.printf "\t%s (%ld)\n" id_str id_num
+      )
+      state.extern_typs;
+    Printf.printf "Ending dump extern_typs.\n";
+    flush stdout
+
+  let dump_in_module_composite_dfns (state: t) =
+    Printf.printf "Begininning dump in_module_composite_dfns:\n";
+    IdentSet.iter
+      (fun id ->
+        let id_str = Linking.ident_to_string ~name:id in
+        let id_num = id |> P.to_int32 in
+        Printf.printf "\t%s (%ld)\n" id_str id_num
+      )
+      state.in_module_composite_dfns;
+    Printf.printf "Ending dump in_module_composite_dfns.\n";
+    flush stdout
+
+  let dump_metadata (state: t) =
+    Printf.printf "\nmetadata for %s\n" state.mod_name;
+    dump_imports state;
+    dump_externs state;
+    dump_in_module_composite_dfns state
 
   let gen_metadata (state: t) =
     get_in_module_composite_typs state;
     all_used_typs_in_module state;
-    ()
-
-
-
-  (* let get_defined_in_module_tys_from_prog state = *)
-  (*   List.filter (fun (Composite(id, _, _, _)) -> *)
-  (*     let (mod_name, Composite(id', _, _, _)) = Linking.get_rep_type_definition state.linking ~ty_id:id in *)
-  (*     if mod_name = state.name then *)
-  (*       true *)
-  (*     else *)
-  (**)
-  (*   ) *)
-  (*   state.r_prog.prog_types *)
-
-
-  (* gather composite types from globals *)
-  (* let get_imports_from_gbls_syms state = *)
-  (*   List.fold_left *)
-  (*       (fun acc (elt: (AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) -> *)
-  (*          match elt with *)
-  (*          | id, Gvar v ->  if (List.length v.gvar_init == 0) then get_fn_foreign_syms sym_mapping [id] acc else acc *)
-  (*          | _id, Gfun f -> ( *)
-  (*              match f with *)
-  (*              | Internal rf -> ( *)
-  (*                get_fn_foreign_syms sym_mapping (PositiveSet.elements rf.fn_imports) acc *)
-  (*              ) *)
-  (*              (* TODO we may need to handle this case? *) *)
-  (*              | External _ -> acc *)
-  (*          ) *)
-  (*       ) *)
-  (*       (Hashtbl.create 7) state.r_prog.prog_defs *)
-
-
-  (* let generate_imports state = *)
-  (*   (* gather composite types from program *) *)
-  (*   let used_composites = get_used_composite_tys_from_prog state in *)
-  (*   todo() *)
-
-    (* let defined_in_module_idents = get_defined_in_module_tys_from_prog state in *)
-
-
-    (* gather composite types from globals *)
-    (* let imports_from_gbls_syms = get_imports_from_gbls_syms state in *)
+    dump_metadata state
 
 end
-

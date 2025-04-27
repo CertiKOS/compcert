@@ -6,6 +6,7 @@ open AST
 open Camlcoq (*for extern_atom*)
 open RustLight
 open! LibcSymbols
+open! Linking
 exception Panic of string
 
 let todo () = failwith "\nTODO\n"
@@ -293,6 +294,8 @@ let temp_name (id: AST.ident) =
     Printf.sprintf "tmp_id_%d" (P.to_int id)
 
 let destination : string option ref = ref None
+
+let linker : Linking.t ref = ref (Linking.create ())
 
 let mod_name : string option ref = ref None
 
@@ -1414,6 +1417,12 @@ let print_if
     (* let project_name = List.to_seq clunky_project_name |> String.of_seq in *)
     match (!destination, !proj_name, !mod_name) with
     | (Some f, Some project_name, Some mod_name) ->
+
+      let imports = Imports.create ~r_prog:prog ~mod_name:mod_name ~l:!linker in
+      Imports.gen_metadata imports;
+
+
+
       (* printf "UUID hashtbl"; *)
       (* pretty_print_hashtbl composite_mapping; *)
 
@@ -1421,7 +1430,7 @@ let print_if
       "./" ^ project_name ^ "/src/" |> change_directory;
       let oc = open_out f in
       print_prog_types prog.prog_types mod_name;
-      print_program (todo()) (todo()) (todo()) (formatter_of_out_channel oc) prog project_name;
+      (* print_program (todo()) (todo()) (todo()) (formatter_of_out_channel oc) prog project_name; *)
       close_out oc;
       change_directory "../..";
     | _ -> printf "METADATA IS MISSING, can't print."
