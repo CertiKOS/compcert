@@ -382,14 +382,8 @@ let print_primitive_init fmt ty = function
 
 let re_string_literal = Str.regexp "__stringlit_[0-9]+"
 
-(* TODO fix this. It's horribly inefficient *)
-let rec find_comp_defn (tds: composite_definition list) id =
-  match tds with
-  | Composite(id_c, _su, m, a) :: l ->
-    if id_c = id then Composite(id, _su, m, a) else find_comp_defn l id
-  | nil -> raise (Panic "Couldn't find type")
-
-
+let find_comp_defn (importer: Imports.t) id =
+  Imports.get_ty_dfn importer ~name:id
 
 let rec print_arr fmt (arr: init_data list) =
     (match arr with
@@ -409,17 +403,17 @@ let rec print_arr fmt (arr: init_data list) =
 
 
 
-let rec print_composite_init fmt tds arr ty =
+let rec print_composite_init fmt (importer: Imports.t) arr ty =
   (*TODO both cases do the same thing. Make it more dry *)
   match ty with
   | Ctypes.Tstruct(id, _attrs) ->
     fprintf fmt "%s {" (extern_atom_r id);
-    let Composite(_, _, membs, _attrs) = find_comp_defn tds id in
+    let Composite(_, _, membs, _attrs) = find_comp_defn importer id in
     let res = List.fold_left (fun acc memb ->
         match memb with
         | Member_plain(id_memb, ty_memb) -> (
           fprintf fmt "%s: " (extern_atom_r id_memb);
-          let arr_res = print_composite_init fmt tds acc ty_memb in
+          let arr_res = print_composite_init fmt importer acc ty_memb in
           fprintf fmt ",";
           arr_res
         )
@@ -429,12 +423,12 @@ let rec print_composite_init fmt tds arr ty =
     res
   | Ctypes.Tunion(id, _attrs) ->
     fprintf fmt "%s {" (extern_atom_r id);
-    let Composite(_, _, membs, _attrs) = find_comp_defn tds id in
+    let Composite(_, _, membs, _attrs) = find_comp_defn importer id in
     let res = List.fold_left (fun acc memb ->
         match memb with
         | Member_plain(id_memb, ty_memb) -> (
           fprintf fmt "%s: " (extern_atom_r id_memb);
-          let arr_res = print_composite_init fmt tds acc ty_memb in
+          let arr_res = print_composite_init fmt importer acc ty_memb in
           fprintf fmt ",";
           arr_res
         )
@@ -448,7 +442,7 @@ let rec print_composite_init fmt tds arr ty =
 
       let res =
       List.fold_left (fun acc _ ->
-          let res = print_composite_init fmt tds acc ty_inner in
+          let res = print_composite_init fmt importer acc ty_inner in
           fprintf fmt ", ";
           res
       ) (arr |> List.filter (fun x -> match x with Init_space _ -> false | _ -> true)) (List.init (camlint_of_coqint num |> Int32.to_int) (fun x -> x)) in
@@ -516,7 +510,7 @@ let string_of_init fmt id (expected_length: int option) =
     if l' <= 0 then () else (Buffer.add_string b "\\0"; add_extras (l'-1))
   in List.iter add_init id; add_extras extras; Buffer.contents b
 
-let print_globvar fmt tds id v =
+let print_globvar fmt (importer: Imports.t) id v =
   let name_bare = extern_atom_r id in
   let linkage = if C2C.atom_is_static id then "" else "pub " in
   (* NOTE: *)
@@ -559,7 +553,7 @@ let print_globvar fmt tds id v =
               (* | Ctypes.Tstruct(_, _) => *)
               (* | Ctypes.Tstruct(_, _) => *)
               (* in *)
-              let _ = print_composite_init fmt tds il v.gvar_info in
+              let _ = print_composite_init fmt importer il v.gvar_info in
               fprintf fmt " }"
             )
     end;
@@ -933,10 +927,10 @@ let print_fundef fmt id fundef =
   | Ctypes.External(_, _, _, _) ->  fprintf fmt ""
 
 
-let print_globdef fmt tds (id, gd) =
+let print_globdef fmt (importer: Imports.t) (id, gd) =
   match gd with
   | Gfun fundef -> print_fundef fmt id fundef
-  | Gvar v -> print_globvar fmt tds id v
+  | Gvar v -> print_globvar fmt importer id v
 
 let struct_or_union = function Struct -> "struct" | Union -> "union"
 
@@ -1211,54 +1205,71 @@ let define_composite_type_alias fmt cur_mod_name project_name contains_main (in_
 
 
 (* TODO undo logic for crate use because contains_main is now always false *)
-let print_imports fmt mod_name (import_map: (string, StringSet.t) Hashtbl.t) (composite_import_map) project_name contains_main (res_idents: (ident, (ident * string)) Hashtbl.t) =
+let print_imports fmt imports project_name contains_main =
   (* let import_map = convert_idents_to_mod res_idents import_map_unmerged in *)
-  Hashtbl.iter (fun module_ impts ->
-    if module_ = "external_symbols" || module_ = mod_name then
-      (* do nothing here, we'll print afterwards *)
-      ()
+  Hashtbl.iter (fun (module_name: string) (is: ImportSet.t) ->
+    let crate = if contains_main then project_name ^ "::" else "crate::" in
+    let import_names = ImportSet.elements is in
+    let size = List.length import_names in
+    (if size == 1 then
+      let ele = List.hd import_names in
+      match ele with
+      | (Some (a), id) ->
+          fprintf fmt "use %s%s::%s as %s;" crate (remove_c_extension module_name) (Linking.ident_to_string ~name:id) a
+      | (None, id) -> fprintf fmt "use %s%s::%s;" crate (remove_c_extension module_name) (Linking.ident_to_string ~name:id)
     else (
-      (* printf "\n\nDOING EXPORTS FOR %s\n\n" module_; *)
-      fprintf fmt "@[";
-      let elts = StringSet.elements impts in
-      let size = List.length elts in
-      (* TODO this line will have to be changed *)
-      let crate =
-        if module_ = "libc" then "" else
-          (* if mod_name = "main" then project_name ^ "rust_project" else "crate::" in *)
+      fprintf fmt "use %s%s::{" crate (remove_c_extension module_name);
+      List.iter (fun x ->
+        match x with
+        | (None, id) -> fprintf fmt "%s, " (Linking.ident_to_string ~name:id)
+        | (Some(x'), id) -> fprintf fmt "%s as %s, " (Linking.ident_to_string ~name:id) x'
+        ) import_names;
+      fprintf fmt "};"
+    ));
 
-          if contains_main then project_name ^ "::" else "crate::" in
-      (if size == 1 then
-        let ele = List.hd elts in
-        fprintf fmt "use %s%s::%s;" crate (remove_c_extension module_) ele
-      else (
-        fprintf fmt "use %s%s::{" crate (remove_c_extension module_);
-        List.iter (fun x -> fprintf fmt "%s, " x) elts;
-        fprintf fmt "};"
-      ));
-      fprintf fmt "@]@;"
-    )) import_map;
+
+    ) imports;
   fprintf fmt "@;"
 
 let print_extern_types
   fmt
-  (extern_types: StringSet.t)
+  (is: IdentSet.t)
+
   =
     fprintf fmt "unsafe extern \"C\" {@ @[<v 2>@;";
-    List.iter
+    IdentSet.iter
     (fun name ->
-      fprintf fmt "pub type %s;@;" name
-    ) (StringSet.elements extern_types);
+      fprintf fmt "pub type %s;@;" (Linking.ident_to_string ~name)
+    ) is;
     fprintf fmt "@;<0 -2>}@]@;@;"
+(* fun elt -> *)
+(*       match Hashtbl.find_opt sigs elt with *)
+(*       | Some(Gfun(External(ef, tl, rty, _))) -> ( *)
+(*         match ef with *)
+(*         | EF_external(name, s) *)
+(*         | EF_builtin(name, s) *)
+(*         | EF_runtime(name, s) -> *)
+(*             fprintf fmt "fn %s(" (List.to_seq name |> String.of_seq); *)
+(*             List.iter (fun ty -> *)
+(*               fprintf fmt "_: %s," (gen_ty_rust false ty) *)
+(*             ) (map_tylist_to_list tl); *)
+(*             if s.sig_cc.cc_vararg <> None then fprintf fmt " _:..."; *)
+(*             fprintf fmt ") -> %s;@;" (gen_ty_rust false rty) *)
+(*         | _ -> printf "\nERROR unsupported external fn type \n" *)
+(*       ) *)
+(*       | Some(Gfun(Internal(_))) -> printf "\n ERROR: external linkage for internal function??\n" *)
+(*       | Some(Gvar(gv)) -> *)
+(*           fprintf fmt "static mut %s: %s;@;" elt (gen_ty_rust false gv.gvar_info) *)
+(*       | None -> printf "\n ERROR: could not find function to link against in external function list for symbol %s?? Can't get signature, so bailing\n" elt *)
 
 let print_externs fmt
-  (extern_imports: StringSet.t)
-  (sigs: (string, (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef ) Hashtbl.t)
+  (syms: (ident, (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) Hashtbl.t)
   =
     fprintf fmt "unsafe extern \"C\" {@ @[<v 2>@;";
-    List.iter (fun elt ->
-      match Hashtbl.find_opt sigs elt with
-      | Some(Gfun(External(ef, tl, rty, _))) -> (
+    Hashtbl.iter (fun id fd ->
+      let id_str = Linking.ident_to_string ~name:id in
+      match fd with
+      | Gfun(Ctypes.External(ef, tl, rty, _)) -> (
         match ef with
         | EF_external(name, s)
         | EF_builtin(name, s)
@@ -1269,13 +1280,16 @@ let print_externs fmt
             ) (map_tylist_to_list tl);
             if s.sig_cc.cc_vararg <> None then fprintf fmt " _:...";
             fprintf fmt ") -> %s;@;" (gen_ty_rust false rty)
+        | EF_malloc -> fprintf fmt "fn malloc(_: core::ffi::c_size_t) -> *mut core::ffi::c_void;@;"
+        | EF_free -> fprintf fmt "fn free(_: *mut core::ffi::c_void);@;"
         | _ -> printf "\nERROR unsupported external fn type \n"
       )
-      | Some(Gfun(Internal(_))) -> printf "\n ERROR: external linkage for internal function??\n"
-      | Some(Gvar(gv)) ->
-          fprintf fmt "static mut %s: %s;@;" elt (gen_ty_rust false gv.gvar_info)
-      | None -> printf "\n ERROR: could not find function to link against in external function list for symbol %s?? Can't get signature, so bailing\n" elt
-    ) (StringSet.elements extern_imports);
+      | Gfun(Internal(_)) -> printf "\n ERROR: external linkage for internal function??\n"
+      | Gvar(gv) ->
+          fprintf fmt "static mut %s: %s;@;" id_str (gen_ty_rust false gv.gvar_info)
+      (* | _ -> printf "\n ERROR: could not find function to link against in external function list for symbol %s?? Can't get signature, so bailing\n" id_str *)
+
+    ) syms;
     fprintf fmt "@;<0 -2>}@]@;@;"
 
 let make_syms_usable (syms: ((AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list)) =
@@ -1305,49 +1319,29 @@ let prog_contains_main (prog: RustLight.r_program) =
 
 
 (* TODO this is a bit of a hack. Should probably be handled in the semantics of rustlight *)
-let print_program (sym_mapping: (string, string) Hashtbl.t)
-    composite_mapping mod_name f (prog: RustLight.r_program)
-    (project_name: string)
+let print_program f (importer: Imports.t) project_name
     =
-
-
-  let [@warning "-42"] p_defs = prog.prog_defs in
-  let [@warning "-42"] p_types = prog.prog_types in
-
-  let (imports, extern_typs, in_module_composite_dfns, res_idents) = gen_imports sym_mapping p_defs composite_mapping p_types mod_name in
-
 
   fprintf f "@[<v 0>";
 
-  (* let has_main_fn = prog_contains_main prog in *)
-
-  (* this is enabled for all the libraries
-     but not for the file containing main *)
-  (* if has_main_fn then *)
-  (*   fprintf f "#![feature(extern_types)]@;#![feature(c_size_t)]@;#![no_main]@;@;"; *)
-
-
   (* do printing  *)
 
-  print_imports f mod_name imports composite_mapping project_name false res_idents;
+  let imports : (string, ImportSet.t) Hashtbl.t = Imports.get_imports importer in
 
-  (match Hashtbl.find_opt imports "external_symbols" with
-  | Some external_symbols -> (
-    print_externs f external_symbols (prog.prog_defs |> make_syms_usable);
-    print_extern_types f extern_typs
-  )
-  | None -> ());
+  print_imports f imports project_name false;
 
-  let in_module_composite_defns_list = in_module_composite_dfns |> Hashtbl.to_seq |> List.of_seq |> List.filter (fun (name_id, _) -> Hashtbl.mem res_idents name_id |> not) |> List.map snd in
-  (* let in_module_composite_defns_list = in_module_composite_dfns |> Hashtbl.to_seq |> List.of_seq |> List.map snd in *)
+  print_externs f (Imports.get_extern_syms importer);
+  print_extern_types f (Imports.get_extern_typs importer);
 
-  (* List.iter *)
-  (*   (fun x -> printf "\nUUID IN MODULE %s: print struct %s\n" mod_name *)
-  (*               (match x with | Ctypes.Composite(id, _, _, _) -> extern_atom_r id)) in_module_composite_defns_list; *)
+  let in_module_composite_defns : composite_definition list = Imports.get_in_module_composite_defns importer in
 
-  List.iter (define_composite f) in_module_composite_defns_list;
-  List.iter (define_composite_type_alias f mod_name project_name false) (res_idents |> Hashtbl.to_seq |> List.of_seq);
-  List.iter (print_globdef f p_types) p_defs;
+
+
+  List.iter (define_composite f) in_module_composite_defns;
+
+  let in_module_prog_dfns = Imports.get_globvars importer in
+
+  List.iter (print_globdef f importer) in_module_prog_dfns;
   fprintf f "@]@."
 
 let change_directory dir_name =
@@ -1357,27 +1351,6 @@ let change_directory dir_name =
   | Unix.Unix_error (err, _, _) ->
     Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
 
-(* global syms  *)
-let fix_mapping_types (mapping: (char list * char list) list) : (string, string) Hashtbl.t =
-  let elts = List.map (fun (a, b) -> (String.of_seq (List.to_seq a), String.of_seq (List.to_seq b))) mapping in
-  List.fold_left (fun acc (k, v) -> Hashtbl.replace acc k v; acc) (Hashtbl.create 7) elts
-
-(* global composite defns *)
-let fix_mapping_types_2 (mapping: (char list * ((char list * Ctypes.composite_definition) option)) list) : (string, (string * Ctypes.composite_definition) option) Hashtbl.t =
-  let elts = List.map (fun (k, opt_v) ->
-    let k_str = String.of_seq (List.to_seq k) in
-    let v_opt = match opt_v with
-      | None -> None
-      | Some (v_list, dfn) ->
-        let v_str = String.of_seq (List.to_seq v_list) |> remove_c_extension in
-        Some (v_str, dfn)
-    in
-    (k_str, v_opt)
-  ) mapping in
-  let tbl = Hashtbl.create 7 in
-  List.iter (fun (k, v_opt) -> Hashtbl.add tbl k v_opt) elts;
-  tbl
-
 let rec print_prog_types prog_types mod_name =
   match prog_types with
   | Composite(ty_ident, _, _, _) :: l' ->
@@ -1386,15 +1359,11 @@ let rec print_prog_types prog_types mod_name =
   | nil -> ()
 
 let print_main
-  (* (clunky_mod_name: char list) *)
-  (* (clunky_project_name: char list) *)
   ((rfn, new_main_ident): (r_function * ident) )
   =
-    let mod_name = todo() in
-    let project_name = todo() in
-    match !destination with
-    | None -> printf "MISSING DEST FOR %s" mod_name
-    | Some f ->
+    Printf.printf "PRINTING MAIN NOW!!!";
+    match (!destination, !proj_name, !mod_name) with
+    | (Some f, Some project_name, Some mod_name) ->
       "./" ^ project_name ^ "/src/" |> change_directory;
       let oc = open_out f in
       let fmt = formatter_of_out_channel oc in
@@ -1407,7 +1376,7 @@ let print_main
       close_out oc;
 
       change_directory "../.."
-
+    | _ -> failwith "MISSING METADATA FOR main generation"
 
 let print_if
   (* (clunky_mod_name: char list) *)
@@ -1420,17 +1389,13 @@ let print_if
 
       let imports = Imports.create ~r_prog:prog ~mod_name:mod_name ~l:!linker in
       Imports.gen_metadata imports;
-
-
-
       (* printf "UUID hashtbl"; *)
       (* pretty_print_hashtbl composite_mapping; *)
 
       (* TODO uncomment*)
       "./" ^ project_name ^ "/src/" |> change_directory;
       let oc = open_out f in
-      print_prog_types prog.prog_types mod_name;
-      (* print_program (todo()) (todo()) (todo()) (formatter_of_out_channel oc) prog project_name; *)
+      print_program (formatter_of_out_channel oc) imports project_name;
       close_out oc;
       change_directory "../..";
     | _ -> printf "METADATA IS MISSING, can't print."

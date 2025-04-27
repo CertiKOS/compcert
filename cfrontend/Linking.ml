@@ -6,6 +6,14 @@ open Camlcoq (*for extern_atom*)
 open! Ctypes
 open RustLight
 
+(* TODO pull in janestreet stdlib *)
+let (>>=) o f =
+  match o with
+  | None   -> None
+  | Some x -> f x
+
+let flip f x y = f y x
+
 let unimplemented s = failwith (Printf.sprintf "Not yet implemented %s" s)
 
 module StringSet = Set.Make(String)
@@ -110,14 +118,21 @@ module Linking : sig
 
   val get_rep_type_definition: t -> ty_id: tyuid -> (tyuid * composite_definition)
 
+  val get_globdef: t -> name: ident -> (string * (Clight.coq_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) option
+  val has_internal_sym: t -> mod_name: string -> name: ident -> bool
+
   val types_are_compat: t -> mod_1: string -> ty_1: composite_definition -> mod_2: string -> ty_2: composite_definition -> bool
 
   (* fills out r_ty_map s.t. there's only one "representative type" and the rest are de-duplicated *)
   val fill_out_rep_types: t -> unit
 
+  val get_globvars: t -> (ident, (string * (Clight.coq_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) Hashtbl.t
+
   val add_globdef: t -> name: ident -> mod_name: string -> defn: (Clight.coq_function Ctypes.fundef, Ctypes.coq_type) AST.globdef -> unit
 
   val add_ty_defn: t -> mod_name: string -> cd: composite_definition -> unit
+
+  val get_main_module: t -> string option
 end =
   struct
     type t = {
@@ -125,12 +140,19 @@ end =
       (* *even* if the same name is. *)
       type_map : (tyuid, composite_definition) Hashtbl.t;
 
-      globvars : (ident, (string * (Clight.coq_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) Hashtbl.t;
 
       (* map of representative types *)
       r_ty_map: (tyuid, tyuid) Hashtbl.t;
 
       rep_types: (tyuid, TySet.t) Hashtbl.t;
+
+      (* global definitions *)
+      globvars : (ident, (string * (Clight.coq_function Ctypes.fundef, Ctypes.coq_type) AST.globdef)) Hashtbl.t;
+
+      (* module local definitions *)
+      internal_symbols: (string, IdentSet.t) Hashtbl.t;
+
+      mutable main_module: string option;
 
       (* there's two phases: build up types and globals, then resolve the globals to generate imports and representative types *)
       mutable is_locked: bool
@@ -142,9 +164,12 @@ end =
       globvars  = Hashtbl.create 8;
       r_ty_map  = Hashtbl.create 8;
       rep_types = Hashtbl.create 8;
+      internal_symbols = Hashtbl.create 8;
+      main_module = None;
       is_locked = false;
     }
 
+    let get_globvars state = state.globvars
 
     let ident_to_string ~name =
       let res = Hashtbl.find string_of_atom name in
@@ -153,6 +178,18 @@ end =
         if res = "_" then "_RENAMING_UNDERSCORE" else (
           if StringSet.mem res rust_keywords then "r#" ^ res else res)
       )
+
+    let set_main_module state =
+      Hashtbl.iter (fun id (m, _) -> if "main_inner" = (ident_to_string ~name:id) then state.main_module <- Some(m)) state.globvars;
+      match state.main_module with
+      | None ->
+        Printf.printf "No MAIN MODULE found"
+      | Some(mm) ->
+        Printf.printf "MAIN MODULE FOUND AND IS: %s" mm
+
+    let get_main_module state =
+      set_main_module state;
+      state.main_module
 
     let dump_rep_ty_table (state: t) unit =
       Printf.printf "Begininning dump r_ty_map: \n";
@@ -177,7 +214,35 @@ end =
       Printf.printf "ending dump rep_types: \n";
       flush stdout
 
-    let add_globdef (state: t) ~name ~mod_name ~defn = Hashtbl.replace state.globvars name (mod_name, defn)
+    let add_globdef (state: t) ~name ~mod_name ~defn =
+      let linkage_is_static = C2C.atom_is_static name in
+      if linkage_is_static then
+        (* these are not globals. I think this information is lost by the time we get to clight.
+           Important to record here *)
+        Hashtbl.replace state.internal_symbols mod_name
+          (match Hashtbl.find_opt state.internal_symbols mod_name with
+           | Some set -> IdentSet.add name set
+           | None     -> IdentSet.singleton name)
+        (* Printf.printf "\nLINKAGE IS STATIC FOR %s (%ld)\n" (ident_to_string ~name:name) (name |> P.to_int32) *)
+      else(
+        Hashtbl.replace state.globvars name (mod_name, defn);
+        (* Printf.printf "\nCONSIDERING LINKAGE FOR %s (%ld)\n" (ident_to_string ~name:name) (name |> P.to_int32); *)
+        (* (* these are globals. We only want to record the ones that are defined symbols. *) *)
+        (* if C2C.atom_is_extern name |> not then ( *)
+        (*   Printf.printf "\nLINKAGE IS NOT EXTERN FOR %s (%ld)\n" (ident_to_string ~name:name) (name |> P.to_int32)) *)
+        (* else *)
+        (*   (* there's a lot of these *) *)
+        (*   Printf.printf "\nLINKAGE IS EXTERN FOR %s (%ld)\n" (ident_to_string ~name:name) (name |> P.to_int32) *)
+      )
+
+    let get_globdef (state: t) ~name = Hashtbl.find_opt state.globvars name
+
+    let has_internal_sym (state: t) ~mod_name ~name =
+      let maybe_opt = Hashtbl.find_opt state.internal_symbols mod_name in
+      match maybe_opt with
+      | Some(tbl) -> IdentSet.mem name tbl
+      | None -> false
+
 
     let add_ty_defn (state: t) ~mod_name ~cd =
       let Composite(id, _, _, _) = cd in
@@ -364,17 +429,22 @@ module Imports : sig
 
   val gen_metadata: t -> unit
 
-  (* val get_extern_typs: t -> string list *)
+  val get_extern_typs: t -> IdentSet.t
+
+  val get_extern_syms: t -> (ident, (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) Hashtbl.t
+
+  val get_globvars: t -> (ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) list
 
   (* module, name, definition *)
   (* note: only imports for types. Not for globals + functions. That is separate. *)
-  (* val get_imports: t -> (string * string * composite_definition list) list *)
-  (**)
-  (* val get_in_module_composite_defns: t -> (string * composite_definition) list *)
+  val get_imports: t -> (string, ImportSet.t) Hashtbl.t
+  val get_in_module_composite_defns: t -> composite_definition list
 
   (* val generate_imports: t -> unit *)
 
   (* TODO need to deal with linking globals too, but that is much easier. *)
+
+  val get_ty_dfn: t -> name: ident -> composite_definition
 
 end = struct
   type t = {
@@ -383,6 +453,8 @@ end = struct
     (* module name -> (identifier, name to import as) set*)
     imports: (string, ImportSet.t) Hashtbl.t;
     mutable extern_typs: IdentSet.t;
+    (* global symbols that must be improted*)
+    mutable extern_syms: (ident, (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) Hashtbl.t;
     mutable in_module_composite_dfns: IdentSet.t;
     mod_name: string;
   }
@@ -393,14 +465,46 @@ end = struct
       r_prog;
       imports = Hashtbl.create 8;
       extern_typs = IdentSet.empty;
+      extern_syms = Hashtbl.create 8;
       in_module_composite_dfns = IdentSet.empty;
       mod_name;
     }
 
-  (* let get_extern_typs state =  *)
+  let dump_identset (label: string) (set: IdentSet.t) =
+    Printf.printf "Beginning dump %s:\n" label;
+    IdentSet.iter
+      (fun id ->
+        let id_str = Linking.ident_to_string ~name:id in
+        let id_num = P.to_int32 id in
+        Printf.printf "\t%s (%ld)\n" id_str id_num
+      )
+      set;
+    Printf.printf "Ending dump %s.\n" label;
+    flush stdout
 
-  (**)
-  (* let get_imports state = todo() *)
+  let get_extern_typs state = state.extern_typs
+
+  let get_extern_syms state = state.extern_syms
+
+  let get_imports state = state.imports
+
+  let get_ty_dfn state ~name =
+    Linking.get_type_definition state.linking ~ty_id:(state.mod_name, name)
+
+  let get_globvars state =
+    let gvs = Linking.get_globvars state.linking in
+    List.filter_map (fun (id, dfn) ->
+      match dfn with
+      (* in simplexpr we add internal global variables when statically linked *)
+      | AST.Gvar v -> if List.length v.gvar_init > 0 then Some(id, dfn) else None
+      | _ -> if Hashtbl.mem gvs id then Some(id, dfn) else None
+    ) state.r_prog.prog_defs
+
+    (* Hashtbl.to_seq (Linking.get_globvars state.linking) |> List.of_seq |> List.filter_map (fun (id, (mod_name, dfn)) -> if mod_name = state.mod_name then Some(id, dfn) else None) *)
+
+  let get_in_module_composite_defns state =
+    IdentSet.elements state.in_module_composite_dfns  |>
+    List.map (fun id -> (List.find (fun cd -> match cd with Composite(id', _, _, _) -> id = id') state.r_prog.prog_types))
   (**)
   (* let get_in_module_composite_defns state = todo() *)
 
@@ -421,6 +525,19 @@ end = struct
         | _ -> acc
     ) IdentSet.empty state.r_prog.prog_defs
 
+  (* TODO same as function above. Rewrite to just use one of them*)
+  let get_used_idents_from_prog state =
+    List.fold_left (fun acc (elt: AST.ident * (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) ->
+      match elt with
+      | (_id, Gvar v) -> acc
+      | (id, Gfun Internal rf) ->
+          let r_used_types = rf.fn_imports in
+          let types_used = r_used_types |> identset_of_positivetree in
+          dump_identset (Printf.sprintf "used idents from %s" (Linking.ident_to_string ~name:id)) types_used;
+
+          IdentSet.union acc (r_used_types |> identset_of_positivetree)
+      | _ -> acc
+    ) IdentSet.empty state.r_prog.prog_defs
 
   (* iterate through all types in prog_types *)
   (* if type is a representative type from different module *)
@@ -467,6 +584,18 @@ end = struct
     | Tnil -> []
     | Tcons(ty, tl') -> (extract_tys_from_ty ty) @ (extract_tys_from_tl tl')
 
+  let dump_in_module_composite_dfns (state: t) =
+    Printf.printf "Begininning dump in_module_composite_dfns:\n";
+    IdentSet.iter
+      (fun id ->
+        let id_str = Linking.ident_to_string ~name:id in
+        let id_num = id |> P.to_int32 in
+        Printf.printf "\t%s (%ld)\n" id_str id_num
+      )
+      state.in_module_composite_dfns;
+    Printf.printf "Ending dump in_module_composite_dfns.\n";
+    flush stdout
+
 
   let get_contained_typ_idents (Ctypes.Composite(id, sou, members, _))
   =
@@ -487,17 +616,19 @@ end = struct
       (* short circuit is necessary because we just wanna flip through them all if it's true *)
       Hashtbl.fold (fun _ is acc ->
         acc ||
-        (ImportSet.fold (fun (name, id) acc ->
-          acc || match name with None -> (Linking.ident_to_string ~name:id) = ident_name | Some(name) -> name = ident_name
+        (ImportSet.fold (fun (name, id') acc ->
+          acc || match name with None -> (Linking.ident_to_string ~name:id') = ident_name | Some(name) -> name = ident_name
         ) is false)
       ) state.imports false in
     let is_defined = IdentSet.mem id state.in_module_composite_dfns in
-    not is_imported && not is_defined
+    (* Printf.printf "\n%s (%ld) is defined in module %s: %b\n" ident_name (id |> P.to_int32) state.mod_name is_defined; *)
+    (* dump_in_module_composite_dfns state; *)
+    is_imported || is_defined
 
 
   (* returns type idents in the struct that are used but also not in imports or in_module_composite_dfns *)
   let get_used_tys (state: t) (cd: composite_definition) =
-    get_contained_typ_idents cd |> IdentSet.filter (ident_already_exists state)
+    get_contained_typ_idents cd |> IdentSet.filter (fun id -> not (ident_already_exists state id))
 
 
   let set_extern_typs_from_in_module_composite_defns (state: t) =
@@ -510,23 +641,9 @@ end = struct
 
     ) state.in_module_composite_dfns
 
-  let dump_identset (label: string) (set: IdentSet.t) =
-    Printf.printf "Beginning dump %s:\n" label;
-    IdentSet.iter
-      (fun id ->
-        let id_str = Linking.ident_to_string ~name:id in
-        let id_num = P.to_int32 id in
-        Printf.printf "\t%s (%ld)\n" id_str id_num
-      )
-      set;
-    Printf.printf "Ending dump %s.\n" label;
-    flush stdout
-
   let set_extern_typs_from_used_types (state: t) (ids: IdentSet.t) =
-    dump_identset "DUMPING IDETN SETTT\n\n\n" ids;
-    Printf.printf "PROCESSSING ";
     IdentSet.iter (fun ele ->
-      if (ident_already_exists state ele) |> not then
+      if not (ident_already_exists state ele) then
         state.extern_typs <- IdentSet.add ele state.extern_typs
   ) ids
 
@@ -569,26 +686,66 @@ end = struct
     Printf.printf "Ending dump extern_typs.\n";
     flush stdout
 
-  let dump_in_module_composite_dfns (state: t) =
-    Printf.printf "Begininning dump in_module_composite_dfns:\n";
-    IdentSet.iter
-      (fun id ->
-        let id_str = Linking.ident_to_string ~name:id in
-        let id_num = id |> P.to_int32 in
-        Printf.printf "\t%s (%ld)\n" id_str id_num
+  let get_extern_defn (state: t) (name: ident) =
+    let defns = state.r_prog.prog_defs in
+    List.find (fun defn -> name = fst defn) defns
+
+  (* fill out imports with the needed globdefs*)
+  let fill_out_globdef_imports (state: t) =
+    (* TODO think about global variables *)
+    let used_idents = get_used_idents_from_prog state in
+    dump_identset "IDENT USED\n" used_idents;
+    IdentSet.iter (fun id ->
+      let id_str = Linking.ident_to_string ~name:id in
+      (* Printf.printf "\t%s (%ld)\n" id_str (id |> P.to_int32); *)
+      (* if the global definition exists: import it from its respective module*)
+      match Linking.get_globdef state.linking ~name:id with
+      | Some(m, defn) ->(
+          if m = state.mod_name |> not then (
+            let ele = (None, id) in
+            match Hashtbl.find_opt state.imports m with
+            | Some(old_hs) ->
+                let new_hs = ImportSet.add ele old_hs in
+                Hashtbl.replace state.imports m new_hs
+            | None -> Hashtbl.replace state.imports m (ImportSet.singleton ele)))
+      | None -> (
+        Printf.printf "PROCCESSING %s %ld" (Linking.ident_to_string ~name:id) (id |> P.to_int32);
+        (* if the symbol doesn't exist, check if it's statically linked in the file. If it is: do nothing. *)
+
+        if Linking.has_internal_sym state.linking ~name:(id) ~mod_name:(state.mod_name) then
+          ()
+        else
+          (* if the symbol doesn't exist and is not statically linked: look up the signature and extern import it. *)
+          let defn = get_extern_defn state id in
+          Hashtbl.replace state.extern_syms id (snd defn)
       )
-      state.in_module_composite_dfns;
-    Printf.printf "Ending dump in_module_composite_dfns.\n";
+    ) used_idents
+
+  let dump_extern_syms (state: t) =
+    Printf.printf "Beginning dump extern_syms:\n";
+    Hashtbl.iter
+      (fun id globdef ->
+        (* turn the key-ident into a string *)
+        let id_str       = Linking.ident_to_string ~name:id in
+        (* extract the resolved name out of your globdef record: *)
+        Printf.printf "\t%s, %ld\n" id_str (id |> P.to_int32)
+      )
+      state.extern_syms;
+    Printf.printf "Ending dump extern_syms.\n";
     flush stdout
+
 
   let dump_metadata (state: t) =
     Printf.printf "\nmetadata for %s\n" state.mod_name;
     dump_imports state;
     dump_externs state;
-    dump_in_module_composite_dfns state
+    dump_in_module_composite_dfns state;
+    dump_extern_syms state
+
 
   let gen_metadata (state: t) =
     get_in_module_composite_typs state;
+    fill_out_globdef_imports state;
     all_used_typs_in_module state;
     dump_metadata state
 

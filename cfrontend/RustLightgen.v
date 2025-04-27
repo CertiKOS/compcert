@@ -502,12 +502,18 @@ Definition transl_fundef_r
 
 Definition transl_globvar (id: ident) (ty: type) := OK ty.
 
+Locate globdef.
+
 Definition get_glob_syms (cfg: clightcfg_program) : list ident :=
   (* symbols that we know to be in scope already *)
     map fst (filter (fun (prog_symbols: (_ * globdef (Ctypes.fundef ClightCFG.function) type)) =>
        match (snd prog_symbols) with
        | Gfun (Ctypes.Internal _) => true
-       | Gvar v => true
+       | Gvar v =>
+           match AST.gvar_init v with
+           | nil => false
+           | _ => true
+           end
        | _ => false
        end)
      cfg.(Ctypes.prog_defs)).

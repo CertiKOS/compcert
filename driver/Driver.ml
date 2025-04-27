@@ -580,9 +580,9 @@ let cmdline_actions =
 let create_toml unit =
   let oc = open_out "Cargo.toml" in  (* Open the file for writing *)
   let maybe_bin =
-    match StrMap.find ("main" |> String.to_seq |> List.of_seq) !sym_mapping with
+    match Linking.get_main_module !PrintRustLight.linker with
     | Some main_name ->(
-      main_mod_name := main_name |> List.to_seq |> String.of_seq |> Filename.basename;
+      main_mod_name := Filename.basename main_name;
 {|
 [[bin]]
 name = "main"

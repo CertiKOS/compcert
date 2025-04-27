@@ -344,6 +344,7 @@ let extract_symbols (prog : Clight.program) =
          match dfn with
          (* can't be undefined. If it is, then it's defined in another file/external *)
          | AST.Gvar v -> if List.length v.gvar_init > 0 then Some (id, dfn) else None
+         (* | AST.Gvar v -> Some (id, dfn) *)
          | AST.Gfun f -> (
            (* TODO I'm pretty sure we don't care about linkage here. If it's a public function, then there can only be one*)
            (* if it's a static function, the ident used for the other function will be different *)
