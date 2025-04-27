@@ -425,8 +425,9 @@ let generate_mapping unit =
        let glob_list = extract_globals file_name in
        (match glob_list with
         | Errors.OK (lvars, ltyps) ->
-            List.fold_left (fun () (id, defn) -> Linking.add_globdef !(PrintRustLight.linker) ~name:id ~mod_name:(module_name |> List.to_seq |> String.of_seq) ~defn) () lvars;
-            List.fold_left (fun () (id, cd) -> Linking.add_ty_defn !(PrintRustLight.linker) ~mod_name:(module_name |> List.to_seq |> String.of_seq) ~cd) () ltyps
+            let mod_name = module_name |> List.to_seq |> String.of_seq |> Filename.basename in
+            List.fold_left (fun () (id, defn) -> Linking.add_globdef !(PrintRustLight.linker) ~name:id ~mod_name ~defn) () lvars;
+            List.fold_left (fun () (id, cd) -> Linking.add_ty_defn !(PrintRustLight.linker) ~mod_name ~cd) () ltyps
         | Errors.Error _ -> printf "ERROR making mapping!"; ())
 
     ) !list_c_files;

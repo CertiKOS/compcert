@@ -118,6 +118,8 @@ module Linking : sig
 
   val get_rep_type_definition: t -> ty_id: tyuid -> (tyuid * composite_definition)
 
+  val get_rep_type_opt: t -> ty_id: tyuid -> tyuid option
+
   val get_globdef: t -> name: ident -> (string * (Clight.coq_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) option
   val has_internal_sym: t -> mod_name: string -> name: ident -> bool
 
@@ -299,7 +301,9 @@ end =
           in
           let mem_eq_fn = fun mems_1 mems_2 -> (
               match (mems_1, mems_2) with
-              | Ctypes.Member_plain(_, ty), Ctypes.Member_plain(_, ty') -> rep_ty_equal state ~cty_1:ty ~cty_2:ty' ~mod_1 ~mod_2
+              | Ctypes.Member_plain(id_1, ty), Ctypes.Member_plain(id_2, ty') ->
+                  ((is_anon_ident state ~name:id_1 && is_anon_ident state ~name:id_2) || id_1 = id_2) &&
+                    rep_ty_equal state ~cty_1:ty ~cty_2:ty' ~mod_1 ~mod_2
               | Ctypes.Member_bitfield(_, a, b, c, d, e), Ctypes.Member_bitfield(_, a', b', c', d', e') ->
                 a = a' && b = b' && c = c' && d = d' && e = e'
               | _ -> false
@@ -323,6 +327,9 @@ end =
       let rep_ty = Hashtbl.find state.r_ty_map ty_id in
       let cd = get_type_definition state ~ty_id:(rep_ty) in
       (rep_ty, cd)
+
+    let get_rep_type_opt (state: t) ~ty_id =
+      Hashtbl.find_opt state.r_ty_map ty_id
 
     (* TODO the way to handle mutual recursion is a stack. But, we don't yet handle that *)
     (* need to make a test case then handle it. *)
@@ -372,6 +379,9 @@ end =
             Hashtbl.replace state.r_ty_map tid tid2;
 
             let tid_rep_eles = Hashtbl.find state.rep_types tid in
+
+            TySet.iter (fun ele -> Hashtbl.replace state.r_ty_map ele tid2) tid_rep_eles;
+
             Printf.printf"before removal \n";
             dump_rep_types state;
 
@@ -497,7 +507,8 @@ end = struct
       match dfn with
       (* in simplexpr we add internal global variables when statically linked *)
       | AST.Gvar v -> if List.length v.gvar_init > 0 then Some(id, dfn) else None
-      | _ -> if Hashtbl.mem gvs id then Some(id, dfn) else None
+      | _ ->
+          if Hashtbl.mem gvs id || Linking.has_internal_sym state.linking ~mod_name:state.mod_name ~name:id then Some(id, dfn) else None
     ) state.r_prog.prog_defs
 
     (* Hashtbl.to_seq (Linking.get_globvars state.linking) |> List.of_seq |> List.filter_map (fun (id, (mod_name, dfn)) -> if mod_name = state.mod_name then Some(id, dfn) else None) *)
@@ -547,25 +558,24 @@ end = struct
     List.iter (fun (Composite(id, _, _, _) as cd: composite_definition) ->
       let ty_id = (state.mod_name, id) in
 
-      (* if type is a representative type from different module *)
-      let (rep_tyuid, _) = Linking.get_rep_type_definition state.linking ~ty_id in
-
-
-      (* if the representative type is in this module: this is fine *)
-      if rep_tyuid = ty_id then
-        state.in_module_composite_dfns <- IdentSet.add (snd ty_id) state.in_module_composite_dfns
-      else
-        let (rep_mod, rep_uid) = rep_tyuid in
-        let rep_name = Linking.ident_to_string ~name:rep_uid in
-        let ty_name = Linking.ident_to_string ~name:id in
-        let maybe_name = if rep_name = ty_name then None else Some(ty_name) in
-        let ele = (maybe_name, rep_uid) in
-        match Hashtbl.find_opt state.imports rep_mod with
-        | Some(old_hs) ->
-            let new_hs = ImportSet.add ele old_hs in
-            Hashtbl.replace state.imports rep_mod new_hs
-        | None -> Hashtbl.replace state.imports rep_mod (ImportSet.singleton ele)
-    ) state.r_prog.prog_types
+      match Linking.get_rep_type_opt state.linking ~ty_id with
+      | None -> (Printf.printf "ERROR: can't find %s eg %ld in mod %s\n" (Linking.ident_to_string ~name:(snd ty_id)) (P.to_int32 (snd ty_id)) state.mod_name)
+      | Some(rep_tyuid) ->
+        (* if the representative type is in this module: this is fine *)
+        if rep_tyuid = ty_id then
+          state.in_module_composite_dfns <- IdentSet.add (snd ty_id) state.in_module_composite_dfns
+        else
+          let (rep_mod, rep_uid) = rep_tyuid in
+          let rep_name = Linking.ident_to_string ~name:rep_uid in
+          let ty_name = Linking.ident_to_string ~name:id in
+          let maybe_name = if rep_name = ty_name then None else Some(ty_name) in
+          let ele = (maybe_name, rep_uid) in
+          match Hashtbl.find_opt state.imports rep_mod with
+          | Some(old_hs) ->
+              let new_hs = ImportSet.add ele old_hs in
+              Hashtbl.replace state.imports rep_mod new_hs
+          | None -> Hashtbl.replace state.imports rep_mod (ImportSet.singleton ele)
+      ) state.r_prog.prog_types
 
 
   let rec extract_tys_from_ty ty =
@@ -721,6 +731,78 @@ end = struct
       )
     ) used_idents
 
+  let check_if_type_is_elsewhere (state: t) (inner_ident: ident) (id_fn: ident) =
+    Printf.printf "\nUID Considering %s from module %s for function %s\n" (Linking.ident_to_string ~name:inner_ident) state.mod_name (Linking.ident_to_string ~name:id_fn);
+    match Linking.get_globdef state.linking ~name:id_fn with
+    | None -> (
+      Printf.printf "\t couldn't find\n"
+    )
+    | Some(mod_name, _) -> (
+      Printf.printf "\t found in module %s\n" mod_name;
+      match Linking.get_rep_type_opt state.linking ~ty_id:(mod_name, inner_ident) with
+      | None -> (
+        Printf.printf "\t couldn't find rep type\n";
+      )
+      | Some(rep_mod_name, rep_ty) ->
+          Printf.printf "\t found rep type\n";
+          let rename = if (Linking.ident_to_string ~name:inner_ident) = (Linking.ident_to_string ~name:rep_ty) then None else Some(Linking.ident_to_string ~name:inner_ident) in
+          (match Hashtbl.find_opt state.imports rep_mod_name with
+          | Some(is) ->
+              Hashtbl.replace state.imports rep_mod_name (ImportSet.add (rename, rep_ty) is)
+          | None -> (
+              Hashtbl.replace state.imports rep_mod_name (ImportSet.singleton (rename, rep_ty))
+
+          ));
+
+          Printf.printf "\t removing %s from extern_typs\n" (Linking.ident_to_string ~name:rep_ty);
+
+          state.extern_typs <- IdentSet.remove inner_ident state.extern_typs;
+
+          dump_externs state
+    )
+
+    (* figure out which module has the fn in it, call that mod_name*)
+    (* try to get_rep_type of (mod_name, inner_ident) *)
+    (* if that works, remove from extern_typs *)
+    (* insert into import list from corresponding module*)
+
+  let rec check_typ (state: t) (ty: Ctypes.coq_type) (id_fn: ident) =
+    match ty with
+    | Tstruct (id, _)
+    | Tunion (id, _) ->
+        if IdentSet.mem id state.extern_typs then
+          check_if_type_is_elsewhere state id id_fn
+
+    | Tpointer(ty', _)
+    | Tarray (ty', _, _) -> check_typ state ty' id_fn
+    | Tfunction (_, _, _) -> ()
+    | _ -> ()
+
+
+      (* if IdentSet.mem ty state.extern_typs then *)
+      (*   check_typ rty *)
+    (* if id = ty then *)
+    (*   () *)
+
+  let rec fixup_fn (state: t) (prog_def : (AST.ident * ('f Ctypes.fundef, Ctypes.coq_type) AST.globdef)) =
+    match prog_def with
+    | (id, Gfun(External(ef, tl, rty, _))) ->
+        fixup_tylist state tl id
+    | (_, _) -> ()
+
+  and fixup_tylist (state: t) (tl: typelist) (id: ident) =
+      match tl with
+      | Tnil -> ()
+      | Tcons(ty, tl') ->
+          check_typ state ty id;
+          fixup_tylist state tl' id
+
+
+
+  (* sometimes we break if the type is a forward declaration, but can be inferred by the argument of a function. *)
+  let fwd_decl_fixup (state: t) =
+    List.iter (fixup_fn state) state.r_prog.prog_defs
+
   let dump_extern_syms (state: t) =
     Printf.printf "Beginning dump extern_syms:\n";
     Hashtbl.iter
@@ -747,6 +829,7 @@ end = struct
     get_in_module_composite_typs state;
     fill_out_globdef_imports state;
     all_used_typs_in_module state;
+    fwd_decl_fixup state;
     dump_metadata state
 
 end
