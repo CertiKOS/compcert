@@ -886,8 +886,12 @@ let print_function fmt id fn =
   (* let safety_qualifier = if fn.fn_is_safe then "" else "unsafe" in *)
 
   let externc = ( "extern \"C\"") in
-  let nomangle = if C2C.atom_is_static id then "" else "#[unsafe(no_mangle)]" in
-
+  let ed = !Clflags.option_rust_edition in
+  let nomangle = if C2C.atom_is_static id then "" else (
+    match ed with
+    | Clflags.E2021 -> "#[no_mangle]"
+    | Clflags.E2024 -> "#[unsafe(no_mangle)]"
+  ) in
 
   printf "PRINTING FUNCTION %s" fn_name;
   fprintf fmt "%s@ @[<v 2>%s%s%s fn %s(%s) -> %s " nomangle fn_linkage needs_space externc fn_name fn_args rty;
@@ -1236,7 +1240,13 @@ let print_extern_types
   (is: IdentSet.t)
 
   =
-    fprintf fmt "unsafe extern \"C\" {@ @[<v 2>@;";
+
+    let ed = !Clflags.option_rust_edition in
+    let extern_str = match ed with
+    | Clflags.E2021 -> "extern"
+    | Clflags.E2024 -> "unsafe extern"
+    in
+    fprintf fmt "%s \"C\" {@ @[<v 2>@;" extern_str;
     IdentSet.iter
     (fun name ->
       fprintf fmt "pub type %s;@;" (Linking.ident_to_string ~name)
@@ -1265,7 +1275,12 @@ let print_extern_types
 let print_externs fmt
   (syms: (ident, (RustLight.r_function Ctypes.fundef, Ctypes.coq_type) AST.globdef) Hashtbl.t)
   =
-    fprintf fmt "unsafe extern \"C\" {@ @[<v 2>@;";
+    let ed = !Clflags.option_rust_edition in
+    let extern_str = match ed with
+    | Clflags.E2021 -> "extern"
+    | Clflags.E2024 -> "unsafe extern"
+    in
+    fprintf fmt "%s \"C\" {@ @[<v 2>@;" extern_str;
     Hashtbl.iter (fun id fd ->
       let id_str = Linking.ident_to_string ~name:id in
       match fd with

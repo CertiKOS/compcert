@@ -21,8 +21,6 @@ open Assembler
 open Linker
 open! Linking
 
-
-
 let remove_c_extension path =
   let base = Filename.basename path in
   Filename.chop_extension base
@@ -524,6 +522,7 @@ let cmdline_actions =
     option_dasm := true);
   Exact "-sdump", Set option_sdump;
   Exact "-sdump-suffix", String (fun s -> option_sdump := true; sdump_suffix:= s);
+  Exact "-rust-edition", String (fun s -> option_rust_edition := match s with | "2021" -> E2021 | _ -> E2024 );
   Exact "-sdump-folder", String (fun s -> AsmToJSON.sdump_folder := s);] @
 (* General options *)
    general_options @
@@ -535,7 +534,7 @@ let cmdline_actions =
   Exact "-trace", Unit (fun () -> Interp.trace := 2);
   Exact "-random", Unit (fun () -> Interp.mode := Interp.Random);
   Exact "-all", Unit (fun () -> Interp.mode := Interp.All);
-  Exact "-main", String (fun s -> main_function_name := s)
+  Exact "-main", String (fun s -> main_function_name := s);
  ]
 (* Optimization options *)
 (* -f options: come in -f and -fno- variants *)
@@ -595,7 +594,7 @@ path = "./src/|} ^ "inserted_main_module" ^ ".rs\"")
 [package]
 name = "|} ^ !option_drustlight_name ^ {|"
 version = "0.0.0"
-edition = "2024"
+edition = |} ^ (!option_rust_edition |> string_of_rust_edition) ^ {|
 
 [dependencies]
 libc = "0.2.158"

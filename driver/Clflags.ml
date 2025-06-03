@@ -11,6 +11,13 @@
 (* *********************************************************************)
 
 (* Command-line flags *)
+type rust_edition =
+  | E2021
+  | E2024
+
+let string_of_rust_edition = function
+  | E2021 -> "\"2021\""
+  | E2024 -> "\"2024\""
 
 let prepro_options = ref ([]: string list)
 let linker_options = ref ([]: string list)
@@ -46,6 +53,7 @@ let option_drustlight_name = ref "rust_project"
 let option_drustlight = ref false
 (* TODO remove*)
 let option_drustproj = ref false
+let option_rust_edition = ref E2024
 let option_dcminor = ref false
 let option_drtl = ref false
 let option_dltl = ref false
@@ -53,6 +61,7 @@ let option_dalloctrace = ref false
 let option_dmach = ref false
 let option_dasm = ref false
 let option_sdump = ref false
+let option_edition = ref
 let option_g = ref false
 let option_gdwarf = ref (if Configuration.system = "diab" then 2 else 3)
 let option_gdepth = ref 3
