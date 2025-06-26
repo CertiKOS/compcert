@@ -38,17 +38,15 @@
           };
         pkgs = pkgs_unapplied nixpkgs rust-overlay;
         pkgs_old = pkgs_unapplied nixpkgs-old rust-overlay-old;
-        rust_tc_2024 = pkgs.rust-bin.selectLatestNightlyWith (
-          toolchain:
-          toolchain.default.override {
-            extensions = [
-              "rust-src"
-              "rustc-dev"
-              "llvm-tools-preview"
-              "miri"
-            ];
-          }
-        );
+        # rust_tc_2024 = pkgs.rust-bin.selectLatestNightlyWith (
+        rust_tc_2024 = pkgs.rust-bin.nightly."2025-02-20".default.override {
+          extensions = [
+            "rust-src"
+            "rustc-dev"
+            "llvm-tools-preview"
+            "miri"
+          ];
+        };
         rust_tc_2021 = pkgs_old.rust-bin.nightly."2022-08-08".default.override {
           extensions = [
             "rust-src"
@@ -123,7 +121,7 @@
       {
         # TODO this could be cleaner by creating a "parent" shell and inheriting its attrs
         # or similarly use a function
-        packages.devshell = self.devShells.${system}.E2024;
+        packages.devshell = self.devShells.${system}.default;
         devShells.default = pkgs.mkShell {
           OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
