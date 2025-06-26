@@ -1,9 +1,10 @@
+edition := "2024"
+
 test: build
   pushd rust_project && cargo test && popd
 
-
 build: clean
-  ccomp -fstruct-passing -funstructured-switch -std=c18 -drustlight -L../../runtime/ -lm -I/nix/store/gvkk2m282cqh6m7yh4qrz3d7yhzlsd0i-clang-17.0.6-lib/lib/clang/17/include/ -I/nix/store/s3pvsv4as7mc8i2nwnk2hnsyi2qdj4bq-glibc-2.39-31-dev/include *.c
+  ccomp -fstruct-passing -funstructured-switch -std=c18 -drustlight -L../../runtime/ -lm -I/nix/store/gvkk2m282cqh6m7yh4qrz3d7yhzlsd0i-clang-17.0.6-lib/lib/clang/17/include/ -I/nix/store/s3pvsv4as7mc8i2nwnk2hnsyi2qdj4bq-glibc-2.39-31-dev/include -rust-edition {{edition}} *.c
   mkdir -p rust_project/tests
   cp *.rs rust_project/tests/
 
