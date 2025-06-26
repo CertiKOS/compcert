@@ -4,6 +4,8 @@
   inputs = {
     nixpkgs.url = "github:DieracDelta/nixpkgs/jr/coqfmt";
     utils.url = "github:numtide/flake-utils";
+    # only for rust analyzer
+    # RPATH is too finicky on fenix compared to rust-overlay
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -87,7 +89,6 @@
           coqPackages_8_20.coq.ocamlPackages.menhir
           coqPackages_8_20.coq.ocamlPackages.menhirLib
           coqPackages_8_20.coq.ocamlPackages.merlin
-          # coqPackages_8_20.coq.ocamlPackages.utop
           coqPackages_8_20.coq.ocamlPackages.ocp-indent
           coqPackages_8_20.coq.ocamlPackages.ocaml-lsp
           coqPackages_8_20.coq.ocamlPackages.dot-merlin-reader
@@ -96,12 +97,6 @@
           coqPackages_8_20.coq-lsp
           coqPackages_8_20.coqfmt
 
-          # ocaml-ng.ocamlPackages_4_10.ocaml-lsp
-          # coqPackages_8_20.coq.ocamlPackages.ocamlformat
-
-          # ocamlPackages_4_12.menhir
-          # coqPackages_8_20.coqhammer
-          # coqPackages_8_12.smtcoq
           coq_8_20
           pkg-config
           autoconf
@@ -112,6 +107,7 @@
 
           just
           typst
+          # at some point we want to re-add coqhammer
           # cvc4
           libiconv
 
@@ -121,14 +117,14 @@
           # for tmux
           libevent
           libevent.dev
-          # coqPackages.vscoq-language-server
         ];
 
       in
       {
-        # packages.compcerto = pkgs.coqPackages_8_12.compcerto;
+        # TODO this could be cleaner by creating a "parent" shell and inheriting its attrs
+        # or similarly use a function
         packages.devshell = self.devShells.${system}.E2024;
-        devShells.E2024 = pkgs.mkShell {
+        devShells.default = pkgs.mkShell {
           OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
@@ -140,7 +136,7 @@
           buildInputs = baseBuildInputs ++ [ rust_tc_2024 ];
         };
 
-        devShells.E2021 = pkgs.mkShell {
+        devShells.crown = pkgs.mkShell {
           OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
