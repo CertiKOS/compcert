@@ -64,6 +64,9 @@ else
 WARN_ERRORS=
 endif
 
+# COMPFLAGS+=-g -strict-sequence -safe-string -ccopt -static\
+#
+
 COMPFLAGS+=-g -strict-sequence -safe-string \
   $(INCLUDES) -I "$(MENHIR_DIR)" -I "${OCAMLGRAPHPATH}" -I +str -I +unix \
   $(WARNINGS) $(WARN_ERRORS)
