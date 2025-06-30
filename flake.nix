@@ -62,7 +62,13 @@
           pkgs.darwin.apple_sdk.frameworks.CoreServices
           pkgs.darwin.apple_sdk.frameworks.System
           pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-          python3
+          (python3.withPackages (
+            ps: with ps; [
+              numpy
+              requests
+              matplotlib
+            ]
+          ))
           fenix.packages.${system}.rust-analyzer
           # rustc deps
           ninja
@@ -73,7 +79,7 @@
           openssl
 
           coqPackages_8_20.coq.ocamlPackages.core
-          coqPackages_8_20.coq.ocamlPackages.dune_2
+          coqPackages_8_20.coq.ocamlPackages.dune_3
           coqPackages_8_20.coq.ocamlPackages.findlib
           # coqPackages_8_20.coq.ocamlPackages.utop
           coqPackages_8_20.coq.ocamlPackages.cryptokit
@@ -89,9 +95,16 @@
           coqPackages_8_20.coq.ocamlPackages.merlin
           coqPackages_8_20.coq.ocamlPackages.ocp-indent
           coqPackages_8_20.coq.ocamlPackages.ocaml-lsp
+          coqPackages_8_20.coq.ocamlPackages.utop
+          coqPackages_8_20.coq.ocamlPackages.ppxlib
+          coqPackages_8_20.coq.ocamlPackages.ppx_deriving
+
           coqPackages_8_20.coq.ocamlPackages.dot-merlin-reader
           coqPackages_8_20.coq.ocamlPackages.ocamlformat
           coqPackages_8_20.coq.ocamlPackages.ocamlgraph
+          coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv_lib
+          coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv
+          coqPackages_8_20.coq.ocamlPackages.yojson
           coqPackages_8_20.coq-lsp
           coqPackages_8_20.coqfmt
 
@@ -123,7 +136,12 @@
         # or similarly use a function
         packages.devshell = self.devShells.${system}.default;
         devShells.default = pkgs.mkShell {
-          OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
+          OCAMLGRAPHPATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
+          YOJSON_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.yojson}/lib/ocaml/4.14.2/site-lib/yojson";
+          PPX_PATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv";
+          PPX_PATH_2 = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv_lib}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv_lib";
+          PPX_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppxlib}/lib/ocaml/4.14.2/site-lib/ppxlib";
+
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests -Astatic_mut_refs";
@@ -135,7 +153,7 @@
         };
 
         devShells.crown = pkgs.mkShell {
-          OCAMLGRAPHPATH = "${pkgs.coqPackages_8_19.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
+          OCAMLGRAPHPATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests";
