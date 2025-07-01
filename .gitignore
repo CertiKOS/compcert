@@ -83,3 +83,8 @@
 .nra.cache
 .csdp.cache
 rust_projects/*
+
+# Dune Build Results
+_build/
+*.install
+*.opam

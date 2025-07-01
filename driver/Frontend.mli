@@ -11,17 +11,17 @@
 (*                                                                     *)
 (* *********************************************************************)
 
-val preprocess: string -> string -> unit
-  (** From C to preprocessed C *)
+val preprocess : string -> string -> string list -> unit
+(** From C to preprocessed C *)
 
-val parse_c_file: string -> string -> Csyntax.coq_function Ctypes.program
-  (** From preprocessed C to Csyntax *)
+val parse_c_file : string -> string -> Csyntax.coq_function Ctypes.program
+(** From preprocessed C to Csyntax *)
 
-val prepro_actions: (Commandline.pattern * Commandline.action) list
-  (** Commandline options affecting the frontend *)
+val prepro_actions : (Commandline.pattern * Commandline.action) list
+(** Commandline options affecting the frontend *)
 
-val prepro_help: string
-  (** Commandline help description *)
+val prepro_help : string
+(** Commandline help description *)
 
-val init: unit -> unit
-  (** Initialize the Frontend *)
+val init : unit -> unit
+(** Initialize the Frontend *)

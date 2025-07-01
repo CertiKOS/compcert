@@ -14,29 +14,31 @@
 (*                                                                     *)
 (* *********************************************************************)
 
-Require Coqlib.
-Require Wfsimpl.
-Require DecidableClass Decidableplus.
-Require AST.
-Require Iteration.
-Require Floats.
-Require SelectLong.
-Require Selection.
-Require RTLgen.
-Require Inlining.
-Require ValueDomain.
-Require Tailcall.
-Require Allocation.
-Require Bounds.
-Require Ctypes.
-Require Csyntax.
-Require Ctyping.
-Require Clight.
-Require RustLight.
-Require ClightCFG.
-Require Compiler.
-Require Parser.
-Require Initializers.
+From compcert Require Coqlib.
+From compcert Require Wfsimpl.
+From Coq Require DecidableClass.
+From compcert Require Decidableplus.
+From compcert Require AST.
+From compcert Require Iteration.
+From compcert Require Floats.
+From compcert Require SelectLong.
+From compcert Require Selection.
+From compcert Require RTLgen.
+From compcert Require Inlining.
+From compcert Require ValueDomain.
+From compcert Require Tailcall.
+From compcert Require Allocation.
+From compcert Require Bounds.
+From compcert Require Ctypes.
+From compcert Require Csyntax.
+From compcert Require Ctyping.
+From compcert Require Clight.
+From compcert Require RustLight.
+From compcert Require RustLightgen.
+From compcert Require ClightCFG.
+From compcert Require Compiler.
+From compcert Require Parser.
+From compcert Require Initializers.
 
 (* Standard lib *)
 Require Import ExtrOcamlBasic.
@@ -159,7 +161,7 @@ Set Extraction AccessOpaque.
 
 (* Go! *)
 
-Cd "extraction".
+(*Cd "extraction".*)
 
 Separate Extraction
    Compiler.print_r_program_from_cfg
@@ -183,7 +185,8 @@ Separate Extraction
    Conventions1.dummy_int_reg Conventions1.dummy_float_reg
    Conventions1.allocatable_registers
    RTL.instr_defs RTL.instr_uses
-   Machregs.mregs_for_operation Machregs.mregs_for_builtin
+   Machregs.mregs_for_operation Machregs.mregs_for_operation
+   Machregs.mregs_for_builtin
    Machregs.two_address_op Machregs.is_stack_reg
    Machregs.destroyed_at_indirect_call
    AST.signature_main

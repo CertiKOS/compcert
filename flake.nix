@@ -146,8 +146,9 @@
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests -Astatic_mut_refs";
           shellHook = ''
-            export PATH="$PATH:$PWD"
+            export PATH="$PATH:$PWD/_build/install/x86_64/bin/"
             export "RUNTIME=$PWD/runtime"
+            export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
           '';
           buildInputs = baseBuildInputs ++ [ rust_tc_2024 ];
         };
@@ -162,6 +163,7 @@
             export "RUNTIME=$PWD/runtime"
           '';
           buildInputs = baseBuildInputs ++ [ rust_tc_2021 ];
+          COMPCERT_CONFIG = "_build/x86_64/compcert.ini";
         };
       }
     );

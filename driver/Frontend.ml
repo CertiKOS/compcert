@@ -22,31 +22,32 @@ open Driveraux
 
 let re_version = Str.regexp {|\([0-9]+\)\.\([0-9]+\)|}
 
-let (v_major, v_minor) =
+let v_major, v_minor =
   let get n = int_of_string (Str.matched_group n Version.version) in
   assert (Str.string_match re_version Version.version 0);
   (get 1, get 2)
 
 let v_number =
   assert (v_minor < 100);
-  100 * v_major + v_minor
+  (100 * v_major) + v_minor
 
 (* Predefined macros: version numbers, C11 features *)
 
 let predefined_macros =
-  let macros = [
-    "-D__COMPCERT__";
-    sprintf "-D__COMPCERT_MAJOR__=%d" v_major;
-    sprintf "-D__COMPCERT_MINOR__=%d" v_minor;
-    sprintf "-D__COMPCERT_VERSION__=%d" v_number;
-    "-U__STDC_IEC_559_COMPLEX__";
-    "-D__STDC_NO_ATOMICS__";
-    "-D__STDC_NO_COMPLEX__";
-    "-D__STDC_NO_THREADS__";
-    "-D__STDC_NO_VLA__"
-  ] in
-  if Version.buildnr = ""
-  then macros
+  let macros =
+    [
+      "-D__COMPCERT__";
+      sprintf "-D__COMPCERT_MAJOR__=%d" v_major;
+      sprintf "-D__COMPCERT_MINOR__=%d" v_minor;
+      sprintf "-D__COMPCERT_VERSION__=%d" v_number;
+      "-U__STDC_IEC_559_COMPLEX__";
+      "-D__STDC_NO_ATOMICS__";
+      "-D__STDC_NO_COMPLEX__";
+      "-D__STDC_NO_THREADS__";
+      "-D__STDC_NO_VLA__";
+    ]
+  in
+  if Version.buildnr = "" then macros
   else sprintf "-D__COMPCERT_BUILDNR__=%s" Version.buildnr :: macros
 
 (* From C to preprocessed C *)
@@ -54,50 +55,48 @@ let predefined_macros =
 (* We define the type wchar_t since it is dependent on the system and
    we want to avoid more ifdefs in the stddef header file. *)
 let abi_macros () =
-  let wchar_typ = Cprint.name_of_ikind (Cutil.wchar_ikind()) in
-  [
-    sprintf "-D__COMPCERT_WCHAR_TYPE__=%s" wchar_typ
-  ]
+  let wchar_typ = Cprint.name_of_ikind (Cutil.wchar_ikind ()) in
+  [ sprintf "-D__COMPCERT_WCHAR_TYPE__=%s" wchar_typ ]
 
-let preprocess ifile ofile =
+let preprocess ifile ofile extra_flags =
+  (* let extra_flags = Hashtbl.find !compile_commands_hs ifile in *)
   Diagnostics.raise_on_errors ();
-  let output =
-    if ofile = "-" then None else Some ofile in
-  let cmd = List.concat [
-    Configuration.prepro;
-    (if Configuration.gnu_toolchain
-     then ["-std=" ^ !option_std]
-     else []);
-    predefined_macros;
-    abi_macros ();
-    (if !Clflags.use_standard_headers
-     then ["-I" ^ Filename.concat !Clflags.stdlib_path "include" ]
-     else []);
-    List.rev !prepro_options;
-    [ifile]
-  ] in
+  let output = if ofile = "-" then None else Some ofile in
+  let cmd =
+    List.concat
+      [
+        Configuration.prepro;
+        (if Configuration.gnu_toolchain then [ "-std=" ^ !option_std ] else []);
+        predefined_macros;
+        abi_macros ();
+        (if !Clflags.use_standard_headers then
+           [ "-I" ^ Filename.concat !Clflags.stdlib_path "include" ]
+         else []);
+        List.rev !prepro_options;
+        extra_flags;
+        [ ifile ];
+      ]
+  in
   (* printf "\nif: %s, of: %s, \n" ifile ofile ; *)
-  List.iter (printf "cmd %s") cmd ;
+  List.iter (printf "cmd %s") cmd;
   let exc = command ?stdout:output cmd in
-  if exc <> 0 then begin
+  if exc <> 0 then (
     if ofile <> "-" then safe_remove ofile;
-    command_error "preprocessor" exc;
-  end
+    command_error "preprocessor" exc)
 
 (* From preprocessed C to Csyntax *)
 
 let parse_c_file sourcename ifile =
   Debug.init_compile_unit sourcename;
-  Sections.initialize();
-  CPragmas.reset();
+  Sections.initialize ();
+  CPragmas.reset ();
   (* Parsing and production of a simplified C AST *)
   let ast =
-    Parse.preprocessed_file
-      ~unblock: true
-      ~switch_norm: (if !option_funstructured_switch then `Full else `Partial)
-      ~struct_passing: !option_fstruct_passing
-      ~packed_structs: !option_fpacked_structs
-      sourcename ifile in
+    Parse.preprocessed_file ~unblock:true
+      ~switch_norm:(if !option_funstructured_switch then `Full else `Partial)
+      ~struct_passing:!option_fstruct_passing
+      ~packed_structs:!option_fpacked_structs sourcename ifile
+  in
   (* Save C AST if requested *)
   Cprint.print_if ast;
   (* Conversion to Csyntax *)
@@ -107,89 +106,103 @@ let parse_c_file sourcename ifile =
   csyntax
 
 let init () =
-  Machine.config:=
-    begin match Configuration.arch with
-    | "powerpc" -> if Configuration.model = "e5500" || Configuration.model = "ppc64"
-                   then if Configuration.abi = "linux" then Machine.ppc_32_r64_linux_bigendian
-                   else if Configuration.gnu_toolchain then Machine.ppc_32_r64_bigendian
-                   else Machine.ppc_32_r64_diab_bigendian
-                   else if Configuration.abi = "linux" then Machine.ppc_32_linux_bigendian
-                   else if Configuration.gnu_toolchain then Machine.ppc_32_bigendian
-                   else Machine.ppc_32_diab_bigendian
-    | "arm"     -> if Configuration.is_big_endian
-                   then Machine.arm_bigendian
-                   else Machine.arm_littleendian
-    | "x86"     -> if Configuration.model = "64" then
-                     Machine.x86_64
-                   else
-                     if Configuration.abi = "macos"
-                     then Machine.x86_32_macos
-                     else if Configuration.system = "bsd"
-                     then Machine.x86_32_bsd
-                     else Machine.x86_32
-    | "riscV"   -> if Configuration.model = "64"
-                   then Machine.rv64
-                   else Machine.rv32
-    | "aarch64" -> if Configuration.abi = "apple"
-                   then Machine.aarch64_apple
-                   else Machine.aarch64
-    | _         -> assert false
-  end;
+  (Machine.config :=
+     match Configuration.arch with
+     | "powerpc" ->
+         if Configuration.model = "e5500" || Configuration.model = "ppc64" then
+           if Configuration.abi = "linux" then
+             Machine.ppc_32_r64_linux_bigendian
+           else if Configuration.gnu_toolchain then Machine.ppc_32_r64_bigendian
+           else Machine.ppc_32_r64_diab_bigendian
+         else if Configuration.abi = "linux" then Machine.ppc_32_linux_bigendian
+         else if Configuration.gnu_toolchain then Machine.ppc_32_bigendian
+         else Machine.ppc_32_diab_bigendian
+     | "arm" ->
+         if Configuration.is_big_endian then Machine.arm_bigendian
+         else Machine.arm_littleendian
+     | "x86" ->
+         if Configuration.model = "64" then Machine.x86_64
+         else if Configuration.abi = "macos" then Machine.x86_32_macos
+         else if Configuration.system = "bsd" then Machine.x86_32_bsd
+         else Machine.x86_32
+     | "riscV" ->
+         if Configuration.model = "64" then Machine.rv64 else Machine.rv32
+     | "aarch64" ->
+         if Configuration.abi = "apple" then Machine.aarch64_apple
+         else Machine.aarch64
+     | _ -> assert false);
   Env.set_builtins C2C.builtins;
   Cutil.declare_attributes C2C.attributes;
-  CPragmas.initialize()
-
+  CPragmas.initialize ()
 
 (* Add gnu preprocessor list *)
-let gnu_prepro_opt_key key s =
-  prepro_options := s::key::!prepro_options
+let gnu_prepro_opt_key key s = prepro_options := s :: key :: !prepro_options
 
 (* Add gnu preprocessor option *)
-let gnu_prepro_opt s =
-  prepro_options := s::!prepro_options
+let gnu_prepro_opt s = prepro_options := s :: !prepro_options
 
 (* Add gnu preprocessor option s and the implicit -E *)
 let gnu_prepro_opt_e s =
   prepro_options := s :: !prepro_options;
   option_E := true
 
-let gnu_prepro_actions = [
-  Exact "-M", Self gnu_prepro_opt_e;
-  Exact "-MM", Self gnu_prepro_opt_e;
-  Exact "-MF", String (gnu_prepro_opt_key "-MF");
-  Exact "-MG", Self gnu_prepro_opt;
-  Exact "-MP", Self gnu_prepro_opt;
-  Exact "-MT", String (gnu_prepro_opt_key "-MT");
-  Exact "-MQ", String (gnu_prepro_opt_key "-MQ");
-  Exact "-nostdinc", Self (fun s -> gnu_prepro_opt s; use_standard_headers := false);
-  Exact "-imacros", String (gnu_prepro_opt_key "-imacros");
-  Exact "-idirafter", String (gnu_prepro_opt_key "-idirafter");
-  Exact "-isystem", String (gnu_prepro_opt_key "-isystem");
-  Exact "-iquote", String (gnu_prepro_opt_key "-iquote");
-  Exact "-P", Self gnu_prepro_opt;
-  Exact "-C", Self gnu_prepro_opt;
-  Exact "-CC", Self gnu_prepro_opt;
-  Prefix "-finput-charset=", Self gnu_prepro_opt]
+let gnu_prepro_actions =
+  [
+    (Exact "-M", Self gnu_prepro_opt_e);
+    (Exact "-MM", Self gnu_prepro_opt_e);
+    (Exact "-MF", String (gnu_prepro_opt_key "-MF"));
+    (Exact "-MG", Self gnu_prepro_opt);
+    (Exact "-MP", Self gnu_prepro_opt);
+    (Exact "-MT", String (gnu_prepro_opt_key "-MT"));
+    (Exact "-MQ", String (gnu_prepro_opt_key "-MQ"));
+    ( Exact "-nostdinc",
+      Self
+        (fun s ->
+          gnu_prepro_opt s;
+          use_standard_headers := false) );
+    (Exact "-imacros", String (gnu_prepro_opt_key "-imacros"));
+    (Exact "-idirafter", String (gnu_prepro_opt_key "-idirafter"));
+    (Exact "-isystem", String (gnu_prepro_opt_key "-isystem"));
+    (Exact "-iquote", String (gnu_prepro_opt_key "-iquote"));
+    (Exact "-P", Self gnu_prepro_opt);
+    (Exact "-C", Self gnu_prepro_opt);
+    (Exact "-CC", Self gnu_prepro_opt);
+    (Prefix "-finput-charset=", Self gnu_prepro_opt);
+  ]
 
-let prepro_actions = [
-  (* Preprocessing options *)
-  Exact "-I", String(fun s -> prepro_options := s :: "-I" :: !prepro_options;
-    assembler_options := s :: "-I" :: !assembler_options);
-  Prefix "-I", Self(fun s -> prepro_options := s :: !prepro_options;
-    assembler_options := s :: !assembler_options);
-  Exact "-D", String(fun s -> prepro_options := s :: "-D" :: !prepro_options);
-  Prefix "-D", Self(fun s -> prepro_options := s :: !prepro_options);
-  Exact "-U", String(fun s -> prepro_options := s :: "-U" :: !prepro_options);
-  Prefix "-U", Self(fun s -> prepro_options := s :: !prepro_options);
-  Prefix "-Wp,", Self (fun s ->
-    prepro_options := List.rev_append (explode_comma_option s) !prepro_options);
-  Exact "-Xpreprocessor", String (fun s ->
-    prepro_options := s :: !prepro_options);
-  Exact "-include", String (fun s -> prepro_options := s :: "-include" :: !prepro_options);]
-  @ (if Configuration.gnu_toolchain then gnu_prepro_actions else [])
+let prepro_actions =
+  [
+    (* Preprocessing options *)
+    ( Exact "-I",
+      String
+        (fun s ->
+          prepro_options := s :: "-I" :: !prepro_options;
+          assembler_options := s :: "-I" :: !assembler_options) );
+    ( Prefix "-I",
+      Self
+        (fun s ->
+          prepro_options := s :: !prepro_options;
+          assembler_options := s :: !assembler_options) );
+    ( Exact "-D",
+      String (fun s -> prepro_options := s :: "-D" :: !prepro_options) );
+    (Prefix "-D", Self (fun s -> prepro_options := s :: !prepro_options));
+    ( Exact "-U",
+      String (fun s -> prepro_options := s :: "-U" :: !prepro_options) );
+    (Prefix "-U", Self (fun s -> prepro_options := s :: !prepro_options));
+    ( Prefix "-Wp,",
+      Self
+        (fun s ->
+          prepro_options :=
+            List.rev_append (explode_comma_option s) !prepro_options) );
+    ( Exact "-Xpreprocessor",
+      String (fun s -> prepro_options := s :: !prepro_options) );
+    ( Exact "-include",
+      String (fun s -> prepro_options := s :: "-include" :: !prepro_options) );
+  ]
+  @ if Configuration.gnu_toolchain then gnu_prepro_actions else []
 
 let gnu_prepro_help =
-{|  -M            Output a rule suitable for make describing the
+  {|  -M            Output a rule suitable for make describing the
                  dependencies of the main source file
   -MM            Like -M but do not mention system header files
   -MF <file>     Specifies file <file> as output file for -M or -MM
@@ -217,7 +230,8 @@ let gnu_prepro_help =
                   Set the input character set, used for reading source files.
 |}
 
-let prepro_help = {|Preprocessing options:
+let prepro_help =
+  {|Preprocessing options:
   -I<dir>        Add <dir> to search path for #include files
   -include <file> Process <file> as if #include "<file>" appears at the first
                   line of the primary source file.
@@ -226,4 +240,4 @@ let prepro_help = {|Preprocessing options:
   -Wp,<opt>      Pass option <opt> to the preprocessor
   -Xpreprocessor <opt> Pass option <opt> to the preprocessor
 |}
-  ^ (if Configuration.gnu_toolchain then gnu_prepro_help else "")
+  ^ if Configuration.gnu_toolchain then gnu_prepro_help else ""

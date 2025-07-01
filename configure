@@ -1,5 +1,16 @@
 #!/bin/sh
 
+## This configure script now only uses the ocaml configure script internally and passes the arguments
+
+if ! command -v dune 2>&1 >/dev/null
+then
+  echo "dune could not be found. required to run the configure tool."
+  exit 1
+fi
+
+dune exec tools/configure.exe -- "$@"
+exit 0
+
 #######################################################################
 #                                                                     #
 #              The Compcert verified compiler                         #
@@ -797,7 +808,7 @@ S driver
 S debug
 S export
 S cparser
-S extraction
+S extraction/compcert
 
 B lib
 B common
@@ -808,7 +819,7 @@ B driver
 B debug
 B export
 B cparser
-B extraction
+B extraction/compcert
 
 PKG ocamlgraph
 EOF

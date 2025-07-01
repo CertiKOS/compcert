@@ -20,10 +20,15 @@ open Frontend
 open Assembler
 open Linker
 open! Linking
+open Yojson.Safe
+open Result
+open Ppx_yojson_conv_lib.Yojson_conv.Primitives
 
 let remove_c_extension path =
   let base = Filename.basename path in
   Filename.chop_extension base
+
+let compile_commands_hs = Hashtbl.create 5 |> ref
 
 (* TODO this is the start of converting an irreducible graph to a reducible graph *)
 (* open Graph *)
@@ -68,33 +73,36 @@ open RustLight
 let tool_name = "C verified compiler"
 
 (* struct or union ident -> (file, defn) option *)
-let sym_mapping : (str_map_globals) ref = ref (StrMap.empty)
+let sym_mapping : str_map_globals ref = ref StrMap.empty
 
 (* struct or union ident -> (file, defn) option  *)
-let composite_mapping : (str_map_composites) ref = ref (StrMap.empty)
+let composite_mapping : str_map_composites ref = ref StrMap.empty
 
-let csyntax_mapping : (string, Csyntax.coq_function Ctypes.program) Hashtbl.t ref = ref (Hashtbl.create 5)
+let csyntax_mapping :
+    (string, Csyntax.coq_function Ctypes.program) Hashtbl.t ref =
+  ref (Hashtbl.create 5)
 
 let main_mod_name : string ref = ref ""
 
+let find_flags sourcename =
+  match Hashtbl.find_opt !compile_commands_hs sourcename with
+  | None -> []
+  | Some l -> l
+
 (* Optional sdump suffix *)
 let sdump_suffix = ref ".json"
-
-let nolink () =
-  !option_c || !option_S || !option_E || !option_interp
+let nolink () = !option_c || !option_S || !option_E || !option_interp
 
 let object_filename sourcename =
-  if nolink () then
-    output_filename ~final: !option_c sourcename ~suffix:".o"
-  else
-    tmp_file ".o"
-
+  if nolink () then output_filename ~final:!option_c sourcename ~suffix:".o"
+  else tmp_file ".o"
 
 let extract_globals sourcename =
   ensure_inputfile_exists sourcename;
   (* printf "\nPTYPES: %s\n" sourcename; *)
   let preproname = tmp_file ".i" in
-  preprocess sourcename preproname;
+  let extraflags = find_flags sourcename in
+  preprocess sourcename preproname extraflags;
   let csyntax = parse_c_file sourcename preproname in
   Hashtbl.add !csyntax_mapping (remove_c_extension sourcename) csyntax;
 
@@ -107,8 +115,8 @@ let compile_c_file sourcename ifile ofile =
 
   (* Prepare to dump Clight, RTL, etc, if requested *)
   let set_dest dst opt ext =
-    dst := if !opt then Some (output_filename sourcename ~suffix:ext)
-      else None in
+    dst := if !opt then Some (output_filename sourcename ~suffix:ext) else None
+  in
   set_dest Cprint.destination option_dparse ".parsed.c";
   set_dest PrintCsyntax.destination option_dcmedium ".compcert.c";
   set_dest PrintClight.destination option_dclight ".light.c";
@@ -121,32 +129,31 @@ let compile_c_file sourcename ifile ofile =
   set_dest AsmToJSON.destination option_sdump !sdump_suffix;
 
   let module_name_string = remove_c_extension sourcename in
-  let module_name =  module_name_string |> String.to_seq |> List.of_seq in
+  let module_name = module_name_string |> String.to_seq |> List.of_seq in
 
   let csyntax = Hashtbl.find !csyntax_mapping module_name_string in
 
   let project_name = !option_drustlight_name |> String.to_seq |> List.of_seq in
 
   (* TODO(tech debt) project name no longer needed here. Remove it *)
-
   PrintRustLight.proj_name := Some !option_drustlight_name;
   PrintRustLight.mod_name := Some module_name_string;
 
-  match
-    (Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping module_name (project_name) csyntax)
-  with
+  (match
+     Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping
+       module_name project_name csyntax
+   with
   | Errors.OK _rprog -> printf "translated!"
-  | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
-  ;
+  | Errors.Error msg ->
+      fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg));
 
   PrintRustLight.destination := Some "inserted_main_module.rs";
 
-  if !main_mod_name = module_name_string then
-    match
-    (Compiler.print_r_main_from_cfg csyntax) with
-    | Errors.OK _ -> printf "created generated main function and module"
-    | Errors.Error msg -> fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
-    ;
+  (if !main_mod_name = module_name_string then
+     match Compiler.print_r_main_from_cfg csyntax with
+     | Errors.OK _ -> printf "created generated main function and module"
+     | Errors.Error msg ->
+         fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg));
 
   (* TODO this goes in the garbage*)
   (* Convert to Asm *)
@@ -156,14 +163,16 @@ let compile_c_file sourcename ifile ofile =
   (* which is bound to PrintClight.print_if *)
   (* which knows which file to print to because we just set the destination *)
   let asm =
-    match Compiler.apply_partial
-               (Compiler.transf_c_program csyntax)
-               Asmexpand.expand_program with
-    | Errors.OK asm ->
-        asm
+    match
+      Compiler.apply_partial
+        (Compiler.transf_c_program csyntax)
+        Asmexpand.expand_program
+    with
+    | Errors.OK asm -> asm
     | Errors.Error msg ->
-      let loc = file_loc sourcename in
-        fatal_error loc "%a"  print_error msg in
+        let loc = file_loc sourcename in
+        fatal_error loc "%a" print_error msg
+  in
   (* Dump Asm in binary and JSON format *)
   AsmToJSON.print_if asm sourcename;
   (* Print Asm in text form *)
@@ -175,51 +184,51 @@ let compile_c_file sourcename ifile ofile =
 
 let compile_i_file sourcename preproname =
   (* printf"\nCOMPILE_I IS CALLED\n"; *)
-  if !option_interp then begin
+  if !option_interp then (
     Machine.config := Machine.compcert_interpreter !Machine.config;
     let csyntax = parse_c_file sourcename preproname in
     Interp.execute csyntax;
-        ""
-  end else if !option_S then begin
+    "")
+  else if !option_S then (
     compile_c_file sourcename preproname
       (output_filename ~final:true sourcename ~suffix:".s");
-    ""
-  end else begin
+    "")
+  else
     let asmname =
-      if !option_dasm
-      then output_filename sourcename ~suffix:".s"
-      else tmp_file ".s" in
+      if !option_dasm then output_filename sourcename ~suffix:".s"
+      else tmp_file ".s"
+    in
     compile_c_file sourcename preproname asmname;
-    let objname = object_filename sourcename  in
+    let objname = object_filename sourcename in
     assemble asmname objname;
     objname
-  end
 
 let create_directory dir_name =
-try
-  Unix.mkdir dir_name 0o755;  (* 0o755 is the permission code *)
+  try Unix.mkdir dir_name 0o755
+  with
+  (* 0o755 is the permission code *)
   (* Printf.printf "Directory '%s' created successfully.\n" dir_name *)
-with
-| Unix.Unix_error (err, _, _) ->
-  Printf.printf "\nError creating directory: %s with error %s\n\n" dir_name (Unix.error_message err)
+  | Unix.Unix_error (err, _, _) ->
+    Printf.printf "\nError creating directory: %s with error %s\n\n" dir_name
+      (Unix.error_message err)
 
 (* Processing of a .c file *)
 
 let process_c_file sourcename =
+  let extraflags = find_flags sourcename in
   (* printf"\nPROCESS_C IS CALLED\n"; *)
   ensure_inputfile_exists sourcename;
-  if !option_E then begin
-    preprocess sourcename (output_filename_default "-");
-    ""
-  end else begin
-    let preproname = if !option_dprepro then
-      output_filename sourcename ~suffix:".i"
-    else
-      tmp_file ".i" in
+  if !option_E then (
+    preprocess sourcename (output_filename_default "-") extraflags;
+    "")
+  else
+    let preproname =
+      if !option_dprepro then output_filename sourcename ~suffix:".i"
+      else tmp_file ".i"
+    in
 
-    preprocess sourcename preproname;
+    preprocess sourcename preproname extraflags;
     compile_i_file sourcename preproname
-  end
 
 (* Processing of a .i / .p file (preprocessed C) *)
 
@@ -236,47 +245,46 @@ let process_s_file sourcename =
   objname
 
 let process_S_file sourcename =
+  let extraflags = find_flags sourcename in
   ensure_inputfile_exists sourcename;
-  if !option_E then begin
-    preprocess sourcename (output_filename_default "-");
-    ""
-  end else begin
+  if !option_E then (
+    preprocess sourcename (output_filename_default "-") extraflags;
+    "")
+  else
     let preproname = tmp_file ".s" in
-    preprocess sourcename preproname;
+    preprocess sourcename preproname extraflags;
     let objname = object_filename sourcename in
     assemble preproname objname;
     objname
-  end
 
 (* Processing of .h files *)
 
 let process_h_file sourcename =
-  if !option_E then begin
+  let extraflags = find_flags sourcename in
+  if !option_E then (
     ensure_inputfile_exists sourcename;
-    preprocess sourcename (output_filename_default "-");
-    ""
-  end else
-    fatal_error no_loc "input file %s ignored (not in -E mode)\n" sourcename
+    preprocess sourcename (output_filename_default "-") extraflags;
+    "")
+  else fatal_error no_loc "input file %s ignored (not in -E mode)\n" sourcename
 
 let target_help =
   if Configuration.arch = "arm" && Configuration.model <> "armv6" then
-{|Target processor options:
+    {|Target processor options:
   -mthumb        Use Thumb2 instruction encoding
   -marm          Use classic ARM instruction encoding
 |}
-else
-  ""
+  else ""
 
 let toolchain_help =
-  if not Configuration.gnu_toolchain then begin
-{|Toolchain options:
+  if not Configuration.gnu_toolchain then
+    {|Toolchain options:
   -t tof:env     Select target processor for the diab toolchain
-|} end else
-    ""
+|}
+  else ""
 
 let usage_string =
-  version_string tool_name ^
-  {|Usage: ccomp [options] <source files>
+  version_string tool_name
+  ^ {|Usage: ccomp [options] <source files>
 Recognized source files:
   .c             C source file
   .i or .p       C source file that should not be preprocessed
@@ -289,11 +297,9 @@ Processing options:
   -E             Preprocess only, send result to standard output
   -S             Compile to assembler only, save result in <file>.s
   -o <file>      Generate output in <file>
-|} ^
-  prepro_help ^
-  language_support_help ^
- DebugInit.debugging_help ^
-{|Optimization options: (use -fno-<opt> to turn off -f<opt>)
+|}
+  ^ prepro_help ^ language_support_help ^ DebugInit.debugging_help
+  ^ {|Optimization options: (use -fno-<opt> to turn off -f<opt>)
   -O             Optimize the compiled code [on by default]
   -O0            Do not optimize the compiled code
   -O1 -O2 -O3    Synonymous for -O
@@ -318,12 +324,9 @@ Code generation options: (use -fno-<opt> to turn off -f<opt>)
   -falign-branch-targets <n>  Set alignment (in bytes) of branch targets
   -falign-cond-branches <n>  Set alignment (in bytes) of conditional branches
   -fcommon       Put uninitialized globals in the common section [on].
-|} ^
- target_help ^
- toolchain_help ^
- assembler_help ^
- linker_help ^
-{|Tracing options:
+|}
+  ^ target_help ^ toolchain_help ^ assembler_help ^ linker_help
+  ^ {|Tracing options:
   -dprepro       Save C file after preprocessing in <file>.i
   -dparse        Save C file after parsing and elaboration in <file>.parsed.c
   -dc            Save generated Compcert C in <file>.compcert.c
@@ -333,14 +336,14 @@ Code generation options: (use -fno-<opt> to turn off -f<opt>)
   -dltl          Save LTL after register allocation in <file>.ltl
   -dmach         Save generated Mach code in <file>.mach
   -drustlight    Save generated Rust code in <file>.rs
+  -dcompile_command_location  Location of compile_commands.json for rust project
   -drustproj     Save generated Rust code in rust project. Use in conjunction with drustlight.
   -dasm          Save generated assembly in <file>.s
   -dall          Save all generated intermediate files in <file>.<ext>
   -sdump         Save info for post-linking validation in <file>.json
-|} ^
-  general_help ^
-  warning_help ^
-  {|Interpreter mode:
+|}
+  ^ general_help ^ warning_help
+  ^ {|Interpreter mode:
   -interp        Execute given .c files using the reference interpreter
   -quiet         Suppress diagnostic messages for the interpreter
   -trace         Have the interpreter produce a detailed trace of reductions
@@ -350,7 +353,8 @@ Code generation options: (use -fno-<opt> to turn off -f<opt>)
 |}
 
 let print_usage_and_exit () =
-  printf "%s" usage_string; exit 0
+  printf "%s" usage_string;
+  exit 0
 
 let dump_mnemonics destfile =
   let oc = open_out_bin destfile in
@@ -360,184 +364,241 @@ let dump_mnemonics destfile =
   close_out oc;
   exit 0
 
-let optimization_options = [
-  option_ftailcalls; option_fifconversion; option_fconstprop; option_fcse;
-  option_fredundancy; option_finline; option_finline_functions_called_once;
-]
+let optimization_options =
+  [
+    option_ftailcalls;
+    option_fifconversion;
+    option_fconstprop;
+    option_fcse;
+    option_fredundancy;
+    option_finline;
+    option_finline_functions_called_once;
+  ]
 
 let set_all opts () = List.iter (fun r -> r := true) opts
 let unset_all opts () = List.iter (fun r -> r := false) opts
-
 let num_source_files = ref 0
-
 let num_input_files = ref 0
-
-let list_c_files = ref ([])
+let list_c_files = ref []
 
 let print_string_list lst =
   print_string "[";
   List.iter (fun x -> Printf.printf "\"%s\"; " x) lst;
   print_string "]\n"
 
-let add_to_list file = list_c_files := !list_c_files @ [file]
+let add_to_list file = list_c_files := !list_c_files @ [ file ]
 
 let print_hashtbl tbl =
   printf "UID SYMBOL MAPPING: \n";
   Hashtbl.iter (fun key value -> Printf.printf "UID %s: %s\n" key value) tbl;
   printf "UID END SYMBOL MAPPING\n"
 
-let [@warning "-42"] comp_eq a a_ =
-  match a,a_ with
-  | Ctypes.Composite (_, sou, mems, attrs), Ctypes.Composite(_, sou_, mems_, attrs_) -> (
+let[@warning "-42"] comp_eq a a_ =
+  match (a, a_) with
+  | ( Ctypes.Composite (_, sou, mems, attrs),
+      Ctypes.Composite (_, sou_, mems_, attrs_) ) ->
       let sou_r =
         match (sou, sou_) with
-        | (Ctypes.Union, Ctypes.Union) -> true
-        | (Ctypes.Struct, Ctypes.Struct) -> true
+        | Ctypes.Union, Ctypes.Union -> true
+        | Ctypes.Struct, Ctypes.Struct -> true
         | _ -> false
       in
-      let mem_eq_fn = fun m_1 m_2 -> (
-          match (m_1, m_2) with
-          | Ctypes.Member_plain(_, ty), Ctypes.Member_plain(_, ty') -> ty = ty'
-          | Ctypes.Member_bitfield(_, a, b, c, d, e), Ctypes.Member_bitfield(_, a', b', c', d', e') ->
+      let mem_eq_fn =
+       fun m_1 m_2 ->
+        match (m_1, m_2) with
+        | Ctypes.Member_plain (_, ty), Ctypes.Member_plain (_, ty') -> ty = ty'
+        | ( Ctypes.Member_bitfield (_, a, b, c, d, e),
+            Ctypes.Member_bitfield (_, a', b', c', d', e') ) ->
             a = a' && b = b' && c = c' && d = d' && e = e'
-          | _ -> false
-        )
+        | _ -> false
       in
       let mems_r =
-        if (List.length mems) != (List.length mems_) then
-          false
+        if List.length mems != List.length mems_ then false
         else
-          List.fold_left (fun acc (a, b) -> (mem_eq_fn a b) && acc)
-            true
-            (List.combine mems mems_)
+          List.fold_left
+            (fun acc (a, b) -> mem_eq_fn a b && acc)
+            true (List.combine mems mems_)
       in
       let attrs_r = attrs = attrs_ in
       sou_r && mems_r && attrs_r
-    )
 
 let generate_mapping unit =
   (* symbol -> module in rust that exports it *)
   List.iter
     (fun file_name ->
-       let module_name = String.sub file_name 0 ((String.length file_name) - 2) |> String.to_seq |> List.of_seq in
-       let glob_list = extract_globals file_name in
-       (match glob_list with
-        | Errors.OK (lvars, ltyps) ->
-            let mod_name = module_name |> List.to_seq |> String.of_seq |> Filename.basename in
-            List.fold_left (fun () (id, defn) -> Linking.add_globdef !(PrintRustLight.linker) ~name:id ~mod_name ~defn) () lvars;
-            List.fold_left (fun () (id, cd) -> Linking.add_ty_defn !(PrintRustLight.linker) ~mod_name ~cd) () ltyps
-        | Errors.Error _ -> printf "ERROR making mapping!"; ())
-
-    ) !list_c_files;
-    Linking.fill_out_rep_types !(PrintRustLight.linker)
-
+      let module_name =
+        String.sub file_name 0 (String.length file_name - 2)
+        |> String.to_seq |> List.of_seq
+      in
+      let glob_list = extract_globals file_name in
+      match glob_list with
+      | Errors.OK (lvars, ltyps) ->
+          let mod_name =
+            module_name |> List.to_seq |> String.of_seq |> Filename.basename
+          in
+          List.fold_left
+            (fun () (id, defn) ->
+              Linking.add_globdef !PrintRustLight.linker ~name:id ~mod_name
+                ~defn)
+            () lvars;
+          List.fold_left
+            (fun () (id, cd) ->
+              Linking.add_ty_defn !PrintRustLight.linker ~mod_name ~cd)
+            () ltyps
+      | Errors.Error _ ->
+          printf "ERROR making mapping!";
+          ())
+    !list_c_files;
+  Linking.fill_out_rep_types !PrintRustLight.linker
 
 let cmdline_actions =
   let f_opt name ref =
-    [Exact("-f" ^ name), Set ref; Exact("-fno-" ^ name), Unset ref] in
+    [ (Exact ("-f" ^ name), Set ref); (Exact ("-fno-" ^ name), Unset ref) ]
+  in
   let check_align n =
-    if n <= 0 || ((n land (n - 1)) <> 0) then
+    if n <= 0 || n land (n - 1) <> 0 then
       error no_loc "requested alignment %d is not a power of 2" n
-    in
+  in
   [
-(* Getting help *)
-  Exact "-help", Unit print_usage_and_exit;
-  Exact "--help", Unit print_usage_and_exit;]
-(* Getting version info *)
-  @ version_options tool_name @
-(* Enforcing CompCert build numbers for QSKs and mnemonics dump *)
-  (if Version.buildnr <> "" then
-     [Exact "-dump-mnemonics", String  dump_mnemonics;]
-   else []) @
-(* Processing options *)
- [ Exact "-c", Set option_c;
-  Exact "-E", Set option_E;
-  Exact "-S", Set option_S;
-  Exact "-o", String(fun s -> option_o := Some s);
-  Prefix "-o", Self (fun s -> let s = String.sub s 2 ((String.length s) - 2) in
-                              option_o := Some s);]
+    (* Getting help *)
+    (Exact "-help", Unit print_usage_and_exit);
+    (Exact "--help", Unit print_usage_and_exit);
+  ]
+  (* Getting version info *)
+  @ version_options tool_name
+  (* Enforcing CompCert build numbers for QSKs and mnemonics dump *)
+  @ (if Version.buildnr <> "" then
+       [ (Exact "-dump-mnemonics", String dump_mnemonics) ]
+     else [])
+  (* Processing options *)
+  @ [
+      (Exact "-c", Set option_c);
+      (Exact "-E", Set option_E);
+      (Exact "-S", Set option_S);
+      (Exact "-o", String (fun s -> option_o := Some s));
+      ( Prefix "-o",
+        Self
+          (fun s ->
+            let s = String.sub s 2 (String.length s - 2) in
+            option_o := Some s) );
+    ]
   (* Preprocessing options *)
-    @ prepro_actions @
+  @ prepro_actions
   (* Language support options *)
-    language_support_options
+  @ language_support_options
   (* Debugging options *)
-    @ DebugInit.debugging_actions @
-(* Code generation options -- more below *)
- [
-  Exact "-O0", Unit (unset_all optimization_options);
-  Exact "-O", Unit (set_all optimization_options);
-  _Regexp "-O[123]$", Unit (set_all optimization_options);
-  Exact "-Os", Set option_Osize;
-  Exact "-Obranchless", Set option_Obranchless;
-  Exact "-fsmall-data", Integer(fun n -> option_small_data := n);
-  Exact "-fsmall-const", Integer(fun n -> option_small_const := n);
-  Exact "-ffloat-const-prop", Integer(fun n -> option_ffloatconstprop := n);
-  Exact "-falign-functions", Integer(fun n -> check_align n; option_falignfunctions := Some n);
-  Exact "-falign-branch-targets", Integer(fun n -> check_align n; option_falignbranchtargets := n);
-  Exact "-falign-cond-branches", Integer(fun n -> check_align n; option_faligncondbranchs := n);] @
-      f_opt "common" option_fcommon @
-(* Target processor options *)
-  (if Configuration.arch = "arm" then
-    if Configuration.model = "armv6" then
-      [ Exact "-marm", Ignore ] (* Thumb needs ARMv6T2 or ARMv7 *)
-    else
-      [ Exact "-mthumb", Set option_mthumb;
-        Exact "-marm", Unset option_mthumb; ]
-   else []) @
-(* Toolchain options *)
-    (if not Configuration.gnu_toolchain then
-       [Exact "-t", String (fun arg -> push_linker_arg "-t"; push_linker_arg arg;
-                             prepro_options := arg :: "-t" :: !prepro_options;
-                             assembler_options := arg :: "-t" :: !assembler_options;)]
-     else
-       []) @
-(* Assembling options *)
-  assembler_actions @
-(* Linking options *)
-  linker_actions @
-(* Tracing options *)
- [ Exact "-dprepro", Set option_dprepro;
-  Exact "-dparse", Set option_dparse;
-  Exact "-dc", Set option_dcmedium;
-  Exact "-dclight", Set option_dclight;
-  Exact "-dprojname", String (fun s -> option_drustlight_name := s; );
-  Exact "-dcminor", Set option_dcminor;
-  Exact "-drtl", Set option_drtl;
-  Exact "-dltl", Set option_dltl;
-  Exact "-dalloctrace", Set option_dalloctrace;
-  Exact "-dmach", Set option_dmach;
-  Exact "-drustlight", Set option_drustlight;
-  Exact "-drustproj", Set option_drustproj;
-  Exact "-dasm", Set option_dasm;
-  Exact "-dall", Self (fun _ ->
-    option_dprepro := true;
-    option_dparse := true;
-    option_dcmedium := true;
-    option_dclight := true;
-    option_dcminor := true;
-    option_drtl := true;
-    option_dltl := true;
-    option_dalloctrace := true;
-    option_dmach := true;
-    option_dasm := true);
-  Exact "-sdump", Set option_sdump;
-  Exact "-sdump-suffix", String (fun s -> option_sdump := true; sdump_suffix:= s);
-  Exact "-rust-edition", String (fun s -> option_rust_edition := match s with | "2021" -> E2021 | _ -> E2024 );
-  Exact "-sdump-folder", String (fun s -> AsmToJSON.sdump_folder := s);] @
-(* General options *)
-   general_options @
-(* Diagnostic options *)
-  warning_options @
-(* Interpreter mode *)
- [ Exact "-interp", Set option_interp;
-  Exact "-quiet", Unit (fun () -> Interp.trace := 0);
-  Exact "-trace", Unit (fun () -> Interp.trace := 2);
-  Exact "-random", Unit (fun () -> Interp.mode := Interp.Random);
-  Exact "-all", Unit (fun () -> Interp.mode := Interp.All);
-  Exact "-main", String (fun s -> main_function_name := s);
- ]
-(* Optimization options *)
-(* -f options: come in -f and -fno- variants *)
+  @ DebugInit.debugging_actions
+  (* Code generation options -- more below *)
+  @ [
+      (Exact "-O0", Unit (unset_all optimization_options));
+      (Exact "-O", Unit (set_all optimization_options));
+      (_Regexp "-O[123]$", Unit (set_all optimization_options));
+      (Exact "-Os", Set option_Osize);
+      (Exact "-Obranchless", Set option_Obranchless);
+      (Exact "-fsmall-data", Integer (fun n -> option_small_data := n));
+      (Exact "-fsmall-const", Integer (fun n -> option_small_const := n));
+      ( Exact "-ffloat-const-prop",
+        Integer (fun n -> option_ffloatconstprop := n) );
+      ( Exact "-falign-functions",
+        Integer
+          (fun n ->
+            check_align n;
+            option_falignfunctions := Some n) );
+      ( Exact "-falign-branch-targets",
+        Integer
+          (fun n ->
+            check_align n;
+            option_falignbranchtargets := n) );
+      ( Exact "-falign-cond-branches",
+        Integer
+          (fun n ->
+            check_align n;
+            option_faligncondbranchs := n) );
+    ]
+  @ f_opt "common" option_fcommon
+  (* Target processor options *)
+  @ (if Configuration.arch = "arm" then
+       if Configuration.model = "armv6" then [ (Exact "-marm", Ignore) ]
+         (* Thumb needs ARMv6T2 or ARMv7 *)
+       else
+         [
+           (Exact "-mthumb", Set option_mthumb);
+           (Exact "-marm", Unset option_mthumb);
+         ]
+     else [])
+  (* Toolchain options *)
+  @ (if not Configuration.gnu_toolchain then
+       [
+         ( Exact "-t",
+           String
+             (fun arg ->
+               push_linker_arg "-t";
+               push_linker_arg arg;
+               prepro_options := arg :: "-t" :: !prepro_options;
+               assembler_options := arg :: "-t" :: !assembler_options) );
+       ]
+     else [])
+  (* Assembling options *)
+  @ assembler_actions
+  (* Linking options *)
+  @ linker_actions
+  (* Tracing options *)
+  @ [
+      (Exact "-dprepro", Set option_dprepro);
+      (Exact "-dparse", Set option_dparse);
+      (Exact "-dc", Set option_dcmedium);
+      (Exact "-dclight", Set option_dclight);
+      (Exact "-dprojname", String (fun s -> option_drustlight_name := s));
+      ( Exact "-dcompile_command_location",
+        String (fun s -> option_compile_commands := s) );
+      (Exact "-dcminor", Set option_dcminor);
+      (Exact "-drtl", Set option_drtl);
+      (Exact "-dltl", Set option_dltl);
+      (Exact "-dalloctrace", Set option_dalloctrace);
+      (Exact "-dmach", Set option_dmach);
+      (Exact "-drustlight", Set option_drustlight);
+      (Exact "-drustproj", Set option_drustproj);
+      (Exact "-dasm", Set option_dasm);
+      ( Exact "-dall",
+        Self
+          (fun _ ->
+            option_dprepro := true;
+            option_dparse := true;
+            option_dcmedium := true;
+            option_dclight := true;
+            option_dcminor := true;
+            option_drtl := true;
+            option_dltl := true;
+            option_dalloctrace := true;
+            option_dmach := true;
+            option_dasm := true) );
+      (Exact "-sdump", Set option_sdump);
+      ( Exact "-sdump-suffix",
+        String
+          (fun s ->
+            option_sdump := true;
+            sdump_suffix := s) );
+      ( Exact "-rust-edition",
+        String
+          (fun s ->
+            option_rust_edition := match s with "2021" -> E2021 | _ -> E2024) );
+      (Exact "-sdump-folder", String (fun s -> AsmToJSON.sdump_folder := s));
+    ]
+  (* General options *)
+  @ general_options
+  (* Diagnostic options *)
+  @ warning_options
+  (* Interpreter mode *)
+  @ [
+      (Exact "-interp", Set option_interp);
+      (Exact "-quiet", Unit (fun () -> Interp.trace := 0));
+      (Exact "-trace", Unit (fun () -> Interp.trace := 2));
+      (Exact "-random", Unit (fun () -> Interp.mode := Interp.Random));
+      (Exact "-all", Unit (fun () -> Interp.mode := Interp.All));
+      (Exact "-main", String (fun s -> main_function_name := s));
+    ]
+  (* Optimization options *)
+  (* -f options: come in -f and -fno- variants *)
   @ f_opt "tailcalls" option_ftailcalls
   @ f_opt "if-conversion" option_fifconversion
   @ f_opt "const-prop" option_fconstprop
@@ -545,56 +606,106 @@ let cmdline_actions =
   @ f_opt "redundancy" option_fredundancy
   @ f_opt "inline" option_finline
   @ f_opt "inline-functions-called-once" option_finline_functions_called_once
-(* Code generation options *)
+  (* Code generation options *)
   @ f_opt "fpu" option_ffpu
   @ f_opt "sse" option_ffpu (* backward compatibility *)
   @ [
-(* Catch options that are not handled *)
-  Prefix "-", Self (fun s ->
-      fatal_error no_loc "Unknown option `%s'" s);
-(* File arguments *)
-  Suffix ".c", Self (* the entire function here gets executed *) (fun s ->
-      (* printf "next cmd: %s\n" s;  *)
-      add_to_list s; print_string_list !list_c_files; push_action process_c_file s;
-      incr num_source_files; incr num_input_files);
-  Suffix ".i", Self (fun s ->
-      push_action process_i_file s; incr num_source_files; incr num_input_files);
-  Suffix ".p", Self (fun s ->
-      push_action process_i_file s; incr num_source_files; incr num_input_files);
-  Suffix ".s", Self (fun s ->
-      push_action process_s_file s; incr num_source_files; incr num_input_files);
-  Suffix ".S", Self (fun s ->
-      push_action process_S_file s; incr num_source_files; incr num_input_files);
-  Suffix ".sx", Self (fun s ->
-      push_action process_S_file s; incr num_source_files; incr num_input_files);
-  Suffix ".o", Self (fun s -> push_linker_arg s; incr num_input_files);
-  Suffix ".a", Self (fun s -> push_linker_arg s; incr num_input_files);
-  (* GCC compatibility: .o.ext files and .so files are also object files *)
-  _Regexp ".*\\.o\\.", Self (fun s -> push_linker_arg s; incr num_input_files);
-  Suffix ".so", Self (fun s -> push_linker_arg s; incr num_input_files);
-  (* GCC compatibility: .h files can be preprocessed with -E *)
-  Suffix ".h", Self (fun s ->
-      push_action process_h_file s; incr num_source_files; incr num_input_files);
-  ]
+      (* Catch options that are not handled *)
+      (Prefix "-", Self (fun s -> fatal_error no_loc "Unknown option `%s'" s));
+      (* File arguments *)
+      ( Suffix ".c",
+        Self
+          (* the entire function here gets executed *) (fun s ->
+            (* printf "next cmd: %s\n" s;  *)
+            add_to_list s;
+            print_string_list !list_c_files;
+            push_action process_c_file s;
+            incr num_source_files;
+            incr num_input_files) );
+      ( Suffix ".i",
+        Self
+          (fun s ->
+            push_action process_i_file s;
+            incr num_source_files;
+            incr num_input_files) );
+      ( Suffix ".p",
+        Self
+          (fun s ->
+            push_action process_i_file s;
+            incr num_source_files;
+            incr num_input_files) );
+      ( Suffix ".s",
+        Self
+          (fun s ->
+            push_action process_s_file s;
+            incr num_source_files;
+            incr num_input_files) );
+      ( Suffix ".S",
+        Self
+          (fun s ->
+            push_action process_S_file s;
+            incr num_source_files;
+            incr num_input_files) );
+      ( Suffix ".sx",
+        Self
+          (fun s ->
+            push_action process_S_file s;
+            incr num_source_files;
+            incr num_input_files) );
+      ( Suffix ".o",
+        Self
+          (fun s ->
+            push_linker_arg s;
+            incr num_input_files) );
+      ( Suffix ".a",
+        Self
+          (fun s ->
+            push_linker_arg s;
+            incr num_input_files) );
+      (* GCC compatibility: .o.ext files and .so files are also object files *)
+      ( _Regexp ".*\\.o\\.",
+        Self
+          (fun s ->
+            push_linker_arg s;
+            incr num_input_files) );
+      ( Suffix ".so",
+        Self
+          (fun s ->
+            push_linker_arg s;
+            incr num_input_files) );
+      (* GCC compatibility: .h files can be preprocessed with -E *)
+      ( Suffix ".h",
+        Self
+          (fun s ->
+            push_action process_h_file s;
+            incr num_source_files;
+            incr num_input_files) );
+    ]
 
 let create_toml unit =
-  let oc = open_out "Cargo.toml" in  (* Open the file for writing *)
+  let oc = open_out "Cargo.toml" in
+  (* Open the file for writing *)
   let maybe_bin =
     match Linking.get_main_module !PrintRustLight.linker with
-    | Some main_name ->(
-      main_mod_name := Filename.basename main_name;
-{|
+    | Some main_name ->
+        main_mod_name := Filename.basename main_name;
+        {|
 [[bin]]
 name = "main"
-path = "./src/|} ^ "inserted_main_module" ^ ".rs\"")
+path = "./src/|} ^ "inserted_main_module"
+        ^ ".rs\""
     | None -> ""
   in
   (* TODO is there a less ugly way to do this without carrying the whitespace? *)
-  let content = {|
+  let content =
+    {|
 [package]
-name = "|} ^ !option_drustlight_name ^ {|"
+name = "|} ^ !option_drustlight_name
+    ^ {|"
 version = "0.0.0"
-edition = |} ^ (!option_rust_edition |> string_of_rust_edition) ^ {|
+edition = |}
+    ^ (!option_rust_edition |> string_of_rust_edition)
+    ^ {|
 
 [dependencies]
 libc = "0.2.158"
@@ -602,39 +713,48 @@ libc = "0.2.158"
 [lib]
 path = "src/lib.rs"
 
-|} ^ maybe_bin
-in
+|}
+    ^ maybe_bin
+  in
 
   output_string oc content;
   close_out oc
 
 let create_lib unit =
-  let content = List.fold_left
+  let content =
+    List.fold_left
       (fun result file ->
-         let module_name = remove_c_extension file in
-         (* HACK really should separate into function and pass from create_tol *)
-         result^"\npub mod "^module_name^";\n") "#![feature(extern_types)]\n#![feature(c_size_t)]\n" !list_c_files in
+        let module_name = remove_c_extension file in
+        (* HACK really should separate into function and pass from create_tol *)
+        result ^ "\npub mod " ^ module_name ^ ";\n")
+      "#![feature(extern_types)]\n#![feature(c_size_t)]\n" !list_c_files
+  in
   let oc = open_out "lib.rs" in
   output_string oc content;
   close_out oc
 
 let change_directory dir_name =
-  try
-    Unix.chdir dir_name;  (* Change the current working directory *)
+  try Unix.chdir dir_name
   with
+  (* Change the current working directory *)
   | Unix.Unix_error (err, _, _) ->
     Printf.printf "Error changing directory: %s\n" (Unix.error_message err)
 
 let maybe_gen_buildrs () =
   "./" ^ !option_drustlight_name |> change_directory;
-  if StringSet.is_empty !include_dir_set |> not then (
+  if StringSet.is_empty !include_dir_set |> not then
     let oc = open_out "build.rs" in
-    let r_string = "fn main() {\n" |> StringSet.fold (fun e acc -> acc ^ "\tprintln!(\"cargo:rustc-link-arg=" ^ e ^ "\");\n") !include_dir_set in
+    let r_string =
+      "fn main() {\n"
+      |> StringSet.fold
+           (fun e acc ->
+             acc ^ "\tprintln!(\"cargo:rustc-link-arg=" ^ e ^ "\");\n")
+           !include_dir_set
+    in
     output_string oc (r_string ^ "}\n")
-  )
 
 let generate_boilerplate_rust unit =
-  create_directory (!option_drustlight_name);
+  create_directory !option_drustlight_name;
   "./" ^ !option_drustlight_name |> change_directory;
   create_toml ();
   create_directory "src";
@@ -643,33 +763,87 @@ let generate_boilerplate_rust unit =
   change_directory "../..";
   ()
 
+type command_entry = {
+  directory : string;
+  file : string;
+  arguments : string list;
+  output : string option; [@yojson.option]
+}
+[@@deriving show, yojson]
+
+let pp_entry fmt e =
+  let json = yojson_of_command_entry e in
+  Yojson.Safe.pretty_print fmt json
+
+let collect_flags_by_file ccs (entries : command_entry list) =
+  let num_files = List.length entries in
+  Printf.printf "NUMFILES %d\n\n" num_files;
+  let tbl = Hashtbl.create num_files in
+  (* num_input_files := !num_input_files + num_files; *)
+  List.iter
+    (fun e ->
+      (* let flags = match e.arguments with Some args -> args | None -> [] in *)
+      let filtered_flags =
+        List.filter
+          (fun flag ->
+            if String.length flag >= 2 then
+              flag.[0] == '-'
+              && (flag.[1] == 'I' || flag.[1] == 'L' || flag.[1] == 'D')
+            else false)
+          e.arguments
+      in
+      Hashtbl.replace ccs e.file filtered_flags)
+    entries;
+  ()
+
+let gen_entry (res : command_entry) = show_command_entry res |> print_endline
+
+let parse_entries unit =
+  let json = Yojson.Safe.from_file !option_compile_commands in
+  [%of_yojson: command_entry list] json
+  |> collect_flags_by_file !compile_commands_hs
+
 let _ =
   try
-    Gc.set { (Gc.get()) with
-                Gc.minor_heap_size = 524288; (* 512k *)
-                Gc.major_heap_increment = 4194304 (* 4M *)
-           };
+    Gc.set
+      {
+        (Gc.get ()) with
+        Gc.minor_heap_size = 524288;
+        (* 512k *)
+        Gc.major_heap_increment = 4194304 (* 4M *);
+      };
     Printexc.record_backtrace true;
     Frontend.init ();
-    parse_cmdline cmdline_actions;
-    DebugInit.init (); (* Initialize the debug functions *)
+    parse_entries ();
+    if Hashtbl.length !compile_commands_hs = 0 then
+      parse_cmdline cmdline_actions ([] |> Array.of_list)
+    else
+      parse_cmdline cmdline_actions
+        (Hashtbl.to_seq_keys !compile_commands_hs |> Array.of_seq);
+    DebugInit.init ();
+    (* Initialize the debug functions *)
     generate_mapping ();
-    let _ = Camlcoq.atom_of_string = (Hashtbl.create 17 : (string, Camlcoq.atom) Hashtbl.t) in
+    let _ =
+      Camlcoq.atom_of_string
+      = (Hashtbl.create 17 : (string, Camlcoq.atom) Hashtbl.t)
+    in
     let _ = Camlcoq.next_atom = ref BinNums.Coq_xH in
     generate_boilerplate_rust ();
     (* print_hashtbl !sym_mapping; *)
     if nolink () && !option_o <> None && !num_source_files >= 2 then
       fatal_error no_loc "ambiguous '-o' option (multiple source files)";
-    if !num_input_files = 0 then
-      fatal_error no_loc "no input file";
-    if not !option_interp && !main_function_name <> "main" then
+    if !num_input_files = 0 then fatal_error no_loc "no input file";
+    if (not !option_interp) && !main_function_name <> "main" then
       fatal_error no_loc "option '-main' requires option '-interp'";
     (* the line below is where all the compilation goes *)
     let _linker_args = time "Total compilation time" perform_actions () in
     maybe_gen_buildrs ();
     check_errors ()
   with
-  | Sys_error msg
-  | CmdError msg -> error no_loc "%s" msg; exit 2
-  | Abort -> error_summary (); exit 2
+  | Sys_error msg | CmdError msg ->
+      error no_loc "%s" msg;
+      exit 2
+  | Abort ->
+      error_summary ();
+      exit 2
   | e -> crash e

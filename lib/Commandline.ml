@@ -38,8 +38,7 @@ type action =
 exception CmdError of string
 
 let match_pattern text = function
-  | Exact s ->
-      text = s
+  | Exact s -> text = s
   | Prefix pref ->
       let lpref = String.length pref and ltext = String.length text in
       lpref < ltext && String.sub text 0 lpref = pref
@@ -49,8 +48,7 @@ let match_pattern text = function
       lsuff < ltext && String.sub text (ltext - lsuff) lsuff = suff
       (* strict suffix: no match if suff = text, so that e.g. ".c"
          causes an error rather than being treated as a C source file. *)
-  | Regexp re ->
-      Str.string_match re text 0
+  | Regexp re -> Str.string_match re text 0
 
 let rec find_action text = function
   | [] -> None
@@ -62,64 +60,76 @@ let parse_array spec argv first last =
   let exact_cases = (Hashtbl.create 29 : (string, action) Hashtbl.t) in
   let rec split_spec = function
     | [] -> []
-    | (Exact s, act) :: rem -> Hashtbl.add exact_cases s act; split_spec rem
-    | (pat, act) :: rem -> (pat, act) :: split_spec rem in
+    | (Exact s, act) :: rem ->
+        Hashtbl.add exact_cases s act;
+        split_spec rem
+    | (pat, act) :: rem -> (pat, act) :: split_spec rem
+  in
   let inexact_cases = split_spec spec in
   (* Parse the vector of arguments *)
   let rec parse i =
-    if i <= last then begin
+    if i <= last then
       let s = argv.(i) in
       let optact =
         try Some (Hashtbl.find exact_cases s)
-        with Not_found -> find_action s inexact_cases in
+        with Not_found -> find_action s inexact_cases
+      in
       match optact with
       | None ->
-        let msg = sprintf "unknown argument `%s'" s in
-        raise (CmdError msg)
-      | Some(Set r) ->
-          r := true; parse (i+1)
-      | Some(Unset r) ->
-          r := false; parse (i+1)
-      | Some(Self fn) ->
-          fn s; parse (i+1)
-      | Some(String fn) ->
-          if i + 1 <= last then begin
-            fn argv.(i+1); parse (i+2)
-          end else begin
+          let msg = sprintf "unknown argument `%s'" s in
+          raise (CmdError msg)
+      | Some (Set r) ->
+          r := true;
+          parse (i + 1)
+      | Some (Unset r) ->
+          r := false;
+          parse (i + 1)
+      | Some (Self fn) ->
+          fn s;
+          parse (i + 1)
+      | Some (String fn) ->
+          if i + 1 <= last then (
+            fn argv.(i + 1);
+            parse (i + 2))
+          else
             let msg = sprintf "option `%s' expects an argument" s in
             raise (CmdError msg)
-          end
-      | Some(Integer fn) ->
-          if i + 1 <= last then begin
-            match int_of_string_opt argv.(i+1) with
-            | Some n -> fn n; parse (i+2)
+      | Some (Integer fn) ->
+          if i + 1 <= last then
+            match int_of_string_opt argv.(i + 1) with
+            | Some n ->
+                fn n;
+                parse (i + 2)
             | None ->
-                let msg = sprintf "argument to option `%s' must be an integer" s in
+                let msg =
+                  sprintf "argument to option `%s' must be an integer" s
+                in
                 raise (CmdError msg)
-          end else begin
-            let msg = sprintf  "option `%s' expects an argument" s in
-            raise (CmdError msg)
-          end
-      | Some (Ignore) ->
-          if i + 1 <= last then begin
-            parse (i+2)
-          end else begin
+          else
             let msg = sprintf "option `%s' expects an argument" s in
             raise (CmdError msg)
-          end
-      | Some (Unit f) -> f (); parse (i+1)
-    end
-  in parse first
+      | Some Ignore ->
+          if i + 1 <= last then parse (i + 2)
+          else
+            let msg = sprintf "option `%s' expects an argument" s in
+            raise (CmdError msg)
+      | Some (Unit f) ->
+          f ();
+          parse (i + 1)
+  in
+  parse first
 
 let argv =
-  try
-    Responsefile.expandargv Sys.argv
+  try Responsefile.expandargv Sys.argv
   with Responsefile.Error msg | Sys_error msg ->
     eprintf "Error while processing the command line: %s\n" msg;
     exit 2
 
-let parse_cmdline spec =
-  parse_array spec argv 1 (Array.length argv - 1)
+let parse_cmdline spec cfiles =
+  let final_arr = Array.append argv cfiles in
+  Printf.printf "CFILE LENGTH %d" (Array.length cfiles);
+
+  parse_array spec final_arr 1 (Array.length final_arr - 1)
 
 let longopt key f =
   let lkey = String.length key + 1 in
@@ -128,8 +138,8 @@ let longopt key f =
 
 let longopt_int key f =
   longopt key (fun s ->
-    match int_of_string_opt s with
-    | Some n -> f n
-    | None ->
-        let msg =  sprintf "argument to option `%s' must be an integer" key in
-        raise (CmdError msg))
+      match int_of_string_opt s with
+      | Some n -> f n
+      | None ->
+          let msg = sprintf "argument to option `%s' must be an integer" key in
+          raise (CmdError msg))

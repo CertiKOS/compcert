@@ -11,17 +11,15 @@
 (* *********************************************************************)
 
 (* Command-line flags *)
-type rust_edition =
-  | E2021
-  | E2024
+type rust_edition = E2021 | E2024
 
 let string_of_rust_edition = function
   | E2021 -> "\"2021\""
   | E2024 -> "\"2024\""
 
-let prepro_options = ref ([]: string list)
-let linker_options = ref ([]: string list)
-let assembler_options = ref ([]: string list)
+let prepro_options = ref ([] : string list)
+let linker_options = ref ([] : string list)
+let assembler_options = ref ([] : string list)
 let option_flongdouble = ref false
 let option_fstruct_passing = ref false
 let option_fvararg_calls = ref true
@@ -36,7 +34,7 @@ let option_fcse = ref true
 let option_fredundancy = ref true
 let option_fifconversion = ref true
 let option_Obranchless = ref false
-let option_falignfunctions = ref (None: int option)
+let option_falignfunctions = ref (None : int option)
 let option_falignbranchtargets = ref 0
 let option_faligncondbranchs = ref 0
 let option_finline_asm = ref false
@@ -51,6 +49,10 @@ let option_dcmedium = ref false
 let option_dclight = ref false
 let option_drustlight_name = ref "rust_project"
 let option_drustlight = ref false
+
+(* location of compile_commands.json *)
+let option_compile_commands = ref "compile_commands.json"
+
 (* TODO remove*)
 let option_drustproj = ref false
 let option_rust_edition = ref E2024
@@ -65,20 +67,25 @@ let option_edition = ref
 let option_g = ref false
 let option_gdwarf = ref (if Configuration.system = "diab" then 2 else 3)
 let option_gdepth = ref 3
-let option_o = ref (None: string option)
+let option_o = ref (None : string option)
 let option_E = ref false
 let option_S = ref false
 let option_c = ref false
 let option_v = ref false
 let option_interp = ref false
+
 let option_small_data =
-  ref (if Configuration.arch = "powerpc"
+  ref
+    (if
+       Configuration.arch = "powerpc"
        && Configuration.abi = "eabi"
        && Configuration.system = "diab"
-       then 8 else 0)
-let option_small_const = ref (!option_small_data)
+     then 8
+     else 0)
+
+let option_small_const = ref !option_small_data
 let option_timings = ref false
 let option_std = ref "c99"
 let stdlib_path = ref Configuration.stdlib_path
-let use_standard_headers =  ref Configuration.has_standard_headers
+let use_standard_headers = ref Configuration.has_standard_headers
 let main_function_name = ref "main"
