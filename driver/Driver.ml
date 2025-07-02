@@ -799,9 +799,13 @@ let collect_flags_by_file ccs (entries : command_entry list) =
 let gen_entry (res : command_entry) = show_command_entry res |> print_endline
 
 let parse_entries unit =
-  let json = Yojson.Safe.from_file !option_compile_commands in
-  [%of_yojson: command_entry list] json
-  |> collect_flags_by_file !compile_commands_hs
+  try
+    let json = Yojson.Safe.from_file !option_compile_commands in
+    [%of_yojson: command_entry list] json
+    |> collect_flags_by_file !compile_commands_hs
+  with
+  | Sys_error _ -> () (* file not found or access issues *)
+  | Yojson.Json_error _ -> Printf.eprintf "File exists, but invalid json"
 
 let _ =
   try

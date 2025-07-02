@@ -2,7 +2,7 @@
   description = "nix shell";
 
   inputs = {
-    nixpkgs.url = "github:DieracDelta/nixpkgs/jr/coqfmt";
+    nixpkgs.url = "github:NixOS/nixpkgs";
     utils.url = "github:numtide/flake-utils";
     # only for rust analyzer
     # RPATH is too finicky on fenix compared to rust-overlay
@@ -81,14 +81,12 @@
           coqPackages_8_20.coq.ocamlPackages.core
           coqPackages_8_20.coq.ocamlPackages.dune_3
           coqPackages_8_20.coq.ocamlPackages.findlib
-          # coqPackages_8_20.coq.ocamlPackages.utop
           coqPackages_8_20.coq.ocamlPackages.cryptokit
           coqPackages_8_20.coq.ocamlPackages.ocamlbuild
           coqPackages_8_20.coq.ocamlPackages.cppo
           coqPackages_8_20.coq.ocamlPackages.extlib
           coqPackages_8_20.coq.ocamlPackages.yojson
           coqPackages_8_20.coq.ocamlPackages.zarith
-
           coqPackages_8_20.coq.ocamlPackages.ocaml
           coqPackages_8_20.coq.ocamlPackages.menhir
           coqPackages_8_20.coq.ocamlPackages.menhirLib
@@ -98,7 +96,6 @@
           coqPackages_8_20.coq.ocamlPackages.utop
           coqPackages_8_20.coq.ocamlPackages.ppxlib
           coqPackages_8_20.coq.ocamlPackages.ppx_deriving
-
           coqPackages_8_20.coq.ocamlPackages.dot-merlin-reader
           coqPackages_8_20.coq.ocamlPackages.ocamlformat
           coqPackages_8_20.coq.ocamlPackages.ocamlgraph
@@ -107,7 +104,6 @@
           coqPackages_8_20.coq.ocamlPackages.yojson
           coqPackages_8_20.coq-lsp
           coqPackages_8_20.coqfmt
-
           coq_8_20
           pkg-config
           autoconf
@@ -137,10 +133,10 @@
         packages.devshell = self.devShells.${system}.default;
         devShells.default = pkgs.mkShell {
           OCAMLGRAPHPATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
-          YOJSON_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.yojson}/lib/ocaml/4.14.2/site-lib/yojson";
-          PPX_PATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv";
-          PPX_PATH_2 = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv_lib}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv_lib";
-          PPX_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppxlib}/lib/ocaml/4.14.2/site-lib/ppxlib";
+          # YOJSON_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.yojson}/lib/ocaml/4.14.2/site-lib/yojson";
+          # PPX_PATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv";
+          # PPX_PATH_2 = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv_lib}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv_lib";
+          # PPX_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppxlib}/lib/ocaml/4.14.2/site-lib/ppxlib";
 
           ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
@@ -151,6 +147,65 @@
             export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
           '';
           buildInputs = baseBuildInputs ++ [ rust_tc_2024 ];
+        };
+
+        devShells.staticShell = pkgs.pkgsMusl.mkShell {
+          # STATIC_CC = "${pkgs.pkgsStatic.gcc}/bin/gcc";
+          #   OCAMLGRAPHPATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ocamlgraph}/lib/ocaml/4.14.2/site-lib/ocamlgraph";
+          #   # YOJSON_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.yojson}/lib/ocaml/4.14.2/site-lib/yojson";
+          #   # PPX_PATH = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv";
+          #   # PPX_PATH_2 = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv_lib}/lib/ocaml/4.14.2/site-lib/ppx_yojson_conv_lib";
+          #   # PPX_LIB = "${pkgs.coqPackages_8_20.coq.ocamlPackages.ppxlib}/lib/ocaml/4.14.2/site-lib/ppxlib";
+          #
+          #   ARCH = if "${system}" == "aarch64-darwin" then "aarch64-macos" else "${system}";
+          #   RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
+          #   RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests -Astatic_mut_refs";
+          #   shellHook = ''
+          #     export PATH="$PATH:$PWD/_build/install/x86_64/bin/"
+          #     export "RUNTIME=$PWD/runtime"
+          #     export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
+          #   '';
+          buildInputs =
+            # baseBuildInputs
+            # ++
+            (
+              with pkgs.pkgsMusl;
+              [
+
+                coqPackages_8_20.coq.ocamlPackages.core
+                coqPackages_8_20.coq.ocamlPackages.dune_3
+                coqPackages_8_20.coq.ocamlPackages.findlib
+                coqPackages_8_20.coq.ocamlPackages.cryptokit
+                coqPackages_8_20.coq.ocamlPackages.ocamlbuild
+                coqPackages_8_20.coq.ocamlPackages.cppo
+                coqPackages_8_20.coq.ocamlPackages.extlib
+                coqPackages_8_20.coq.ocamlPackages.yojson
+                coqPackages_8_20.coq.ocamlPackages.zarith
+                coqPackages_8_20.coq.ocamlPackages.ocaml
+                coqPackages_8_20.coq.ocamlPackages.menhir
+                coqPackages_8_20.coq.ocamlPackages.menhirLib
+                coqPackages_8_20.coq.ocamlPackages.merlin
+                # coqPackages_8_20.coq.ocamlPackages.ocp-indent
+                # coqPackages_8_20.coq.ocamlPackages.ocaml-lsp
+                # coqPackages_8_20.coq.ocamlPackages.utop
+                coqPackages_8_20.coq.ocamlPackages.ppxlib
+                coqPackages_8_20.coq.ocamlPackages.ppx_deriving
+                # coqPackages_8_20.coq.ocamlPackages.dot-merlin-reader
+                # coqPackages_8_20.coq.ocamlPackages.ocamlformat
+                # coqPackages_8_20.coq.ocamlPackages.ocamlgraph
+                coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv_lib
+                coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv
+                coqPackages_8_20.coq.ocamlPackages.yojson
+                # coqPackages_8_20.coq-lsp
+                # coqPackages_8_20.coqfmt
+                coq_8_20
+                pkg-config
+                autoconf
+                autoreconfHook
+
+                # pkgs.musl
+              ]
+            );
         };
 
         devShells.crown = pkgs.mkShell {
