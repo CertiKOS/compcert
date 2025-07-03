@@ -59,8 +59,8 @@
  (modes byte exe)
  (instrumentation (backend bisect_ppx))
  (libraries compcert)
- (ocamlopt_flags :standard -ccopt -static)
-
+ ; TODO surely there's a way to do this with one env var
+ (ocamlopt_flags :standard %{env:CCOPT_FLAGS=} %{env:STATIC_FLAGS=})
  (preprocess (pps ppx_deriving.show ppx_yojson_conv)))
 
 (include_subdirs no)
