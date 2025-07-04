@@ -48,19 +48,33 @@
     (chdir %{workspace_root}
     (run config_to_ml %{deps})))))
 
+; (ocamlopt_flags (:standard
+;                   (:when (env MAKE_STATIC) (-ccopt -static)))
 
-; generate final compcert executable
+
 (executable
  (name Driver)
  (package compcert)
  (public_name ccomp)
  (modules Driver)
- ; generate both bytecode and exe
  (modes byte exe)
  (instrumentation (backend bisect_ppx))
  (libraries compcert)
- ; TODO surely there's a way to do this with one env var
- (ocamlopt_flags :standard %{env:CCOPT_FLAGS=} %{env:STATIC_FLAGS=})
+ (enabled_if
+  (<> %{env:STATIC_BUILD=} ""))
+ (ocamlopt_flags :standard -ccopt -static)
+ (preprocess (pps ppx_deriving.show ppx_yojson_conv)))
+
+(executable
+ (name Driver)
+ (package compcert)
+ (public_name ccomp)
+ (modules Driver)
+ (modes byte exe)
+ (instrumentation (backend bisect_ppx))
+ (libraries compcert)
+ (enabled_if
+  (= %{env:STATIC_BUILD=} ""))
  (preprocess (pps ppx_deriving.show ppx_yojson_conv)))
 
 (include_subdirs no)

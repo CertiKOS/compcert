@@ -146,9 +146,12 @@
         };
 
         devShells.staticShell = pkgs.pkgsMusl.mkShell {
-          # used by dune build file
-          CCOPT_FLAGS = "-ccopt";
-          STATIC_FLAGS = "-static";
+          shellHook = ''
+            export "RUNTIME=$PWD/runtime"
+            export PATH="$PATH:$PWD/_build/install/x86_64/bin/"
+            export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
+          '';
+          STATIC_BUILD = "1";
           buildInputs = (
             with pkgs.pkgsMusl;
             [
