@@ -85,6 +85,7 @@ Parameter print_Clight: Clight.program -> unit.
 Parameter print_Rustlight_main:
   (RustLight.r_function * ident) -> unit.
 
+Parameter string_of_RustLight: RustLight.r_program -> list Ascii.ascii.
 Parameter print_Rustlight:
   RustLight.r_program -> unit.
 Parameter print_clightcfg_in_ml:
@@ -237,6 +238,20 @@ Definition print_r_program_from_cfg
   @@@ RustLightSplitExpr.transl_program
   @@ print print_Rustlight
   @@@ ret.
+
+Definition r_program_of_cfg
+  (p: Csyntax.program)
+  : res (list Ascii.ascii)
+  :=
+  OK p
+  @@@ SimplExpr.transl_program
+  @@@ ClightCFG.transl_program
+  @@@ RustLightgen.transl_program
+  @@@ RustLightInsertTypeCasts.transl_program
+  @@@ RustLightSplitExpr.transl_program
+  @@ string_of_RustLight.
+  (*@@ print print_Rustlight*)
+
 
 
 Definition transf_c_program (p: Csyntax.program) : res Asm.program :=

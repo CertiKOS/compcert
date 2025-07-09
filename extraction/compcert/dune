@@ -12,7 +12,9 @@
 ; by using the rule stanza below
 (copy_files %{project_root}/platform/TargetPlatformCopy/extractionMachdep.v)
 (copy_files %{project_root}/platform/driver/*.{ml,mli})
+(copy_files %{project_root}/platform/driver/index.html)
 (copy_files %{project_root}/platform/common/*.{ml,mli})
+; (copy_files %{project_root}/platform/common/*.{ml,mli})
 
 
 ; generate "new" extraction.v to be able to depend on extractionMachdep for the extraction
@@ -32,7 +34,7 @@
  ; runtime libraries
  (modules_without_implementation c debugTypes dwarfTypes)
  ; Driver is our runner which uses this library, GCC is unneeded file
- (modules :standard \ Driver GCC)
+ (modules :standard \ Driver GCC DriverWasm)
  ; (ocamlopt_flags :standard -ccopt -static)
  (instrumentation (backend bisect_ppx))
  (flags -w -32)
@@ -47,10 +49,6 @@
   (with-stdout-to %{targets}
     (chdir %{workspace_root}
     (run config_to_ml %{deps})))))
-
-; (ocamlopt_flags (:standard
-;                   (:when (env MAKE_STATIC) (-ccopt -static)))
-
 
 (executable
  (name Driver)
@@ -76,5 +74,25 @@
  (enabled_if
   (= %{env:STATIC_BUILD=} ""))
  (preprocess (pps ppx_deriving.show ppx_yojson_conv)))
+
+(executable
+ (name DriverWasm)
+ (package compcert)
+ (public_name ccomp_web)
+ ; (public_name ccomp_wasm)
+ (modules DriverWasm)
+ (modes byte wasm)
+ (instrumentation (backend bisect_ppx))
+ (libraries compcert js_of_ocaml lwt js_of_ocaml-lwt)
+ (preprocess (pps js_of_ocaml-ppx)))
+
+; (rule
+;  (targets DriverWasm.js)
+;  (deps DriverWasm.bc.js)
+;  (action (run cp %{deps} %{targets})))
+
+; (alias
+;  (name webapp)
+;  (deps DriverWasm.js index.html))
 
 (include_subdirs no)

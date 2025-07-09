@@ -1,4 +1,4 @@
-(lang dune 3.16)
+(lang dune 3.19)
 
 ; Defines different "contexts" - allows us to build all platform compilers at the same time
 ; by overwriting the environment variable TARGET_PLATFORM

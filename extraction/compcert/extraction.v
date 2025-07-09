@@ -127,6 +127,7 @@ Extract Constant Compopts.debug =>
 (* Compiler *)
 Extract Constant Compiler.print_Clight => "PrintClight.print_if".
 Extract Constant Compiler.print_Rustlight => "PrintRustLight.print_if".
+Extract Constant Compiler.string_of_RustLight => "PrintRustLight.string_of_RustLight".
 Extract Constant Compiler.print_Rustlight_main => "PrintRustLight.print_main".
 Extract Constant Compiler.print_clightcfg_in_ml => "PrintClightCFG.print_if".
 Extract Constant Compiler.extract_Symbols => "PrintClight.extract_symbols".
@@ -165,6 +166,7 @@ Set Extraction AccessOpaque.
 
 Separate Extraction
    Compiler.print_r_program_from_cfg
+   Compiler.r_program_of_cfg
    Compiler.print_r_main_from_cfg
    Compiler.transf_c_program Compiler.transf_cminor_program
    Compiler.print_clightcfg

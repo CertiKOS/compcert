@@ -1,4 +1,4 @@
-(lang dune 3.16)
+(lang dune 3.19)
 (using coq 0.9)
 (using menhir 3.0)
 (using directory-targets 0.1)

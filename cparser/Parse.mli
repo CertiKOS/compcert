@@ -16,16 +16,26 @@
 
 (* Entry point for the library: parse, elaborate, and transform *)
 
-val preprocessed_file:
-  ?unblock: bool -> 
-  ?switch_norm: [`Off | `Partial | `Full] ->
-  ?struct_passing: bool ->
-  ?packed_structs: bool ->
-  string -> string -> C.program
-      (** [preprocessed_file filename sourcetext] performs parsing,
-          elaboration, and optional source-to-source transformations.
-          [filename] is the name of the source file, for error messages.
-          [sourcetext] is the text of the source file after preprocessing.
-          The optional arguments indicate which source-to-source
-          transformations to perform.  They default to [false] or [`Off]
-          (do not perform). *)
+val preprocessed_file :
+  ?unblock:bool ->
+  ?switch_norm:[ `Off | `Partial | `Full ] ->
+  ?struct_passing:bool ->
+  ?packed_structs:bool ->
+  string ->
+  string ->
+  C.program
+(** [preprocessed_file filename sourcetext] performs parsing, elaboration, and
+    optional source-to-source transformations. [filename] is the name of the
+    source file, for error messages. [sourcetext] is the text of the source file
+    after preprocessing. The optional arguments indicate which source-to-source
+    transformations to perform. They default to [false] or [`Off] (do not
+    perform). *)
+
+val preprocessed_file_from_string :
+  ?unblock:bool ->
+  ?switch_norm:[ `Off | `Partial | `Full ] ->
+  ?struct_passing:bool ->
+  ?packed_structs:bool ->
+  string ->
+  string ->
+  C.program

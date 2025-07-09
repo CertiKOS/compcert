@@ -58,13 +58,6 @@
           llvmPackages_latest.clang-tools
           llvmPackages_latest.clang
           llvmPackages_latest.openmp
-          (python3.withPackages (
-            ps: with ps; [
-              numpy
-              requests
-              matplotlib
-            ]
-          ))
           fenix.packages.${system}.rust-analyzer
           # rustc deps
           ninja
@@ -142,7 +135,41 @@
             export "RUNTIME=$PWD/runtime"
             export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
           '';
-          buildInputs = baseBuildInputs ++ [ rust_tc_2024 ];
+          packages =
+            baseBuildInputs
+            ++ (with pkgs; [
+              rust_tc_2024
+              # python3Packages.venvShellHook
+              # python3Packages.uv
+
+              (python3.withPackages (
+                ps: with ps; [
+                  # uv
+                  # venvShellHook
+                  docker
+                ]
+              ))
+            ]);
+
+          # venvDir = "./VENV";
+        };
+
+        devShells.buildSite = pkgs.mkShell {
+          buildInputs =
+            baseBuildInputs
+            ++ (with pkgs.coqPackages_8_20.coq.ocamlPackages; [
+              js_of_ocaml
+              js_of_ocaml-compiler
+              js_of_ocaml-toplevel
+              js_of_ocaml-ppx
+              wasm
+              pkgs.nodejs_latest
+              core_kernel
+              wasm_of_ocaml-compiler
+              pkgs.binaryen
+              lwt
+              js_of_ocaml-lwt
+            ]);
         };
 
         devShells.staticShell = pkgs.pkgsMusl.mkShell {
