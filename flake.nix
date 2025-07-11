@@ -91,6 +91,7 @@
           coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv_lib
           coqPackages_8_20.coq.ocamlPackages.ppx_yojson_conv
           coqPackages_8_20.coq.ocamlPackages.yojson
+          coqPackages_8_20.coq.ocamlPackages.merlin
           coqPackages_8_20.coq-lsp
           coqPackages_8_20.coqfmt
           coq_8_20
@@ -137,6 +138,22 @@
           '';
           packages =
             baseBuildInputs
+            # wasm stuff
+            ++ (
+              (with pkgs.coqPackages_8_20.coq.ocamlPackages; [
+                js_of_ocaml
+                js_of_ocaml-compiler
+                js_of_ocaml-toplevel
+                js_of_ocaml-ppx
+                wasm
+                pkgs.nodejs_latest
+                core_kernel
+                wasm_of_ocaml-compiler
+                pkgs.binaryen
+                lwt
+                js_of_ocaml-lwt
+              ])
+            )
             ++ (with pkgs; [
               rust_tc_2024
               # python3Packages.venvShellHook

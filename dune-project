@@ -3,6 +3,8 @@
 (using menhir 3.0)
 (using directory-targets 0.1)
 
+(implicit_transitive_deps false)
+
 (name compcert)
 
 (generate_opam_files)

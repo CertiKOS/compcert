@@ -3,20 +3,20 @@
 
 
 ; riscV
-(subdir platform (rule
- (action (copy riscV.dune dune.inc))
- (enabled_if (= %{env:TARGET_PLATFORM=ppc} riscV))))
-
-
-; arm
-(subdir platform (rule
- (action (copy arm.dune dune.inc))
- (enabled_if (= %{env:TARGET_PLATFORM=ppc} arm))))
-
-; aarch64
-(subdir platform (rule
- (action (copy aarch64.dune dune.inc))
- (enabled_if (= %{env:TARGET_PLATFORM=ppc} aarch64))))
+; (subdir platform (rule
+;  (action (copy riscV.dune dune.inc))
+;  (enabled_if (= %{env:TARGET_PLATFORM=ppc} riscV))))
+;
+;
+; ; arm
+; (subdir platform (rule
+;  (action (copy arm.dune dune.inc))
+;  (enabled_if (= %{env:TARGET_PLATFORM=ppc} arm))))
+;
+; ; aarch64
+; (subdir platform (rule
+;  (action (copy aarch64.dune dune.inc))
+;  (enabled_if (= %{env:TARGET_PLATFORM=ppc} aarch64))))
 
 
 

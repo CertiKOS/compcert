@@ -57,7 +57,7 @@
  (modules Driver)
  (modes byte exe)
  (instrumentation (backend bisect_ppx))
- (libraries compcert)
+ (libraries compcert yojson)
  (enabled_if
   (<> %{env:STATIC_BUILD=} ""))
  (ocamlopt_flags :standard -ccopt -static)
@@ -70,7 +70,7 @@
  (modules Driver)
  (modes byte exe)
  (instrumentation (backend bisect_ppx))
- (libraries compcert)
+ (libraries compcert yojson)
  (enabled_if
   (= %{env:STATIC_BUILD=} ""))
  (preprocess (pps ppx_deriving.show ppx_yojson_conv)))
@@ -81,7 +81,7 @@
  (public_name ccomp_web)
  ; (public_name ccomp_wasm)
  (modules DriverWasm)
- (modes byte wasm)
+ (modes byte wasm native)
  (instrumentation (backend bisect_ppx))
  (libraries compcert js_of_ocaml lwt js_of_ocaml-lwt)
  (preprocess (pps js_of_ocaml-ppx)))

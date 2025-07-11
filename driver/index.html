@@ -46,7 +46,7 @@
         border: 1px solid #ccc;
         border-radius: 4px;
         background: #fdfaf6;
-        overflow: hidden;
+        overflow: auto;
       }
 
       textarea,
@@ -94,6 +94,12 @@
       .buttons {
         margin: 1rem;
       }
+      #rustOutput {
+        display: block;
+        white-space: pre;
+        overflow: auto;
+        pointer-events: auto; /* ✅ Allow interaction */
+      }
     </style>
   </head>
   <body>
@@ -131,7 +137,18 @@
       const cHighlight = document.getElementById("cHighlight");
       const rustOutput = document.getElementById("rustOutput");
 
-      cCodeTextarea.value = `#include <stdio.h>\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`;
+      cCodeTextarea.value = `
+int switch_ex(int e){
+    int a = 9;
+    switch (e) {
+        case 1: a++;
+        case 5: a--;
+        default: a += 2;
+        case 3: a -= 2;
+        case 4: a = 10;
+    }
+    return a;
+}`;
       updateCHighlight();
 
       function updateCHighlight() {
@@ -142,6 +159,14 @@
       cCodeTextarea.addEventListener("scroll", () => {
         cHighlight.parentElement.scrollTop = cCodeTextarea.scrollTop;
         cHighlight.parentElement.scrollLeft = cCodeTextarea.scrollLeft;
+      });
+
+      const rustOutput2 = document.getElementById("rustOutput");
+
+      document.getElementById("my_button").addEventListener("click", () => {
+        setTimeout(() => {
+          Prism.highlightElement(rustOutput2);
+        }, 0); // ✅ Runs after WASM finishes updating DOM
       });
     </script>
   </body>
