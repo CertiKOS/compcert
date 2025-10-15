@@ -98,8 +98,6 @@
           pkg-config
           autoconf
           autoreconfHook
-          libnl
-          libcap
           cargo-expand
 
           just

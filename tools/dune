@@ -16,24 +16,24 @@
  (libraries str))
 
 ; config file generator
-(executable
- (name ini_creator))
-
-(executable
- (name config_creator))
+; (executable
+;  (name ini_creator))
+;
+; (executable
+;  (name config_creator))
 
 ; documentation generator
 ; (executable
 ;  (name gen_documentation)
 ;  (libraries str))
 
-(rule
- (targets MakefileConfig.ml)
- (deps %{project_root}/Makefile.config)
- (action
-  (with-stdout-to %{targets}
-    (chdir %{workspace_root}
-    (run config_to_ml %{deps})))))
+; (rule
+;  (targets MakefileConfig.ml)
+;  (deps %{project_root}/Makefile.config)
+;  (action
+;   (with-stdout-to %{targets}
+;     (chdir %{workspace_root}
+;     (run config_to_ml %{deps})))))
 
 (rule
  (targets Version.ml)
