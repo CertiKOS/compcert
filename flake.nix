@@ -130,10 +130,12 @@
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests -Astatic_mut_refs";
           shellHook = ''
-            export PATH="$PATH:$PWD/_build/install/x86_64/bin/"
+            export PATH="$PWD/_build/install/default/bin/:$PATH"
             export "RUNTIME=$PWD/runtime"
             export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
           '';
+          CLANG_HEADER = "${pkgs.libclang.lib}/lib/clang/19/include";
+          GLIBC_HEADER = "${pkgs.glibc.dev}/include";
           packages =
             baseBuildInputs
             # wasm stuff

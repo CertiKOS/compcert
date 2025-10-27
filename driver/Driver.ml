@@ -721,13 +721,19 @@ path = "src/lib.rs"
   close_out oc
 
 let create_lib unit =
+  let tmp_list =
+    StringSet.elements
+      (List.fold_left
+         (fun acc x -> StringSet.add x acc)
+         StringSet.empty !list_c_files)
+  in
   let content =
     List.fold_left
       (fun result file ->
         let module_name = remove_c_extension file in
         (* HACK really should separate into function and pass from create_tol *)
         result ^ "\npub mod " ^ module_name ^ ";\n")
-      "#![feature(extern_types)]\n#![feature(c_size_t)]\n" !list_c_files
+      "#![feature(extern_types)]\n#![feature(c_size_t)]\n" tmp_list
   in
   let oc = open_out "lib.rs" in
   output_string oc content;
