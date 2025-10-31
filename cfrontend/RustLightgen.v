@@ -541,3 +541,20 @@ Definition transl_program (cfg: clightcfg_program) : res (r_program)
       Ctypes.prog_comp_env_eq := cfg.(prog_comp_env_eq);
     |} in
   OK(r_prog).
+
+(* ============================================================================= *)
+(* CNS IMPLEMENTATION - Controlled Node Splitting Algorithm                     *)
+(* Implementation of algorithm from Janssen & Corporaal (1997)                  *)
+(* "Making Graphs Reducible with Controlled Node Splitting"                    *)
+(* ============================================================================= *)
+
+(* NOTE: The basic graph analysis functions (get_successors, compute_predecessors, *)
+(* compute_dominators, find_sccs) are now in ClightCFG.v and can be imported.     *)
+
+(* ============================================================================= *)
+(* Phase 1 Complete - Basic graph analysis available from ClightCFG.v:          *)
+(*   - get_edge_successors, get_successors                                       *)
+(*   - compute_predecessors, get_predecessors                                    *)
+(*   - compute_dominators, immediate_dominator, dominates                        *)
+(*   - TarjanState, find_sccs, nodes_in_same_loop                               *)
+(* ============================================================================= *)
