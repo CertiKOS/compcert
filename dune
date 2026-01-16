@@ -16,3 +16,14 @@
  (_
   ; (binaries tools/ndfun.exe tools/modorder.exe tools/config_to_ml.exe tools/ini_creator.exe tools/config_creator.exe)))
   (binaries tools/ndfun.exe tools/modorder.exe tools/config_to_ml.exe )))
+
+; LSP support via .merlin files created after build
+(rule
+ (alias lsp)
+ (deps (alias_rec all))
+ (action
+  (system "cd ../.. && bash scripts/create-lsp-symlinks.sh")))
+
+(alias
+ (name default)
+ (deps (alias lsp)))

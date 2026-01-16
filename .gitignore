@@ -25,7 +25,7 @@
 /tools/ndfun
 /tools/modorder
 /Makefile.config
-/.merlin
+.merlin
 /_CoqProject
 /compile.pl
 # Generated files
