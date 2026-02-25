@@ -55,6 +55,7 @@
           ];
         };
         baseBuildInputs = with pkgs; [
+          gcc
           llvmPackages_latest.clang-tools
           llvmPackages_latest.clang
           llvmPackages_latest.openmp

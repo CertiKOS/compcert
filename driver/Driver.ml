@@ -100,13 +100,41 @@ let object_filename sourcename =
 let extract_globals sourcename =
   ensure_inputfile_exists sourcename;
   (* printf "\nPTYPES: %s\n" sourcename; *)
-  let preproname = tmp_file ".i" in
-  let extraflags = find_flags sourcename in
-  preprocess sourcename preproname extraflags;
-  let csyntax = parse_c_file sourcename preproname in
+  let csyntax =
+    if Filename.check_suffix sourcename ".i" || Filename.check_suffix sourcename ".p" then
+      parse_c_file sourcename sourcename
+    else
+      let preproname = tmp_file ".i" in
+      let extraflags = find_flags sourcename in
+      preprocess sourcename preproname extraflags;
+      parse_c_file sourcename preproname
+  in
   Hashtbl.add !csyntax_mapping (remove_c_extension sourcename) csyntax;
 
   Compiler.get_exports csyntax
+
+let run_rust_pipeline_with_cns (csyntax : Csyntax.program) :
+    RustLight.r_program Errors.res =
+  match SimplExpr.transl_program csyntax with
+  | Errors.Error msg -> Errors.Error msg
+  | Errors.OK clight ->
+      match ClightCFG.transl_program clight with
+      | Errors.Error msg -> Errors.Error msg
+      | Errors.OK cfg ->
+          match ClightCFGCNS.transl_program cfg with
+          | Errors.Error msg -> Errors.Error msg
+          | Errors.OK cfg' ->
+              match RustLightgen.transl_program cfg' with
+              | Errors.Error msg -> Errors.Error msg
+              | Errors.OK r_prog ->
+                  match RustLightInsertTypeCasts.transl_program r_prog with
+                  | Errors.Error msg -> Errors.Error msg
+                  | Errors.OK casted_prog ->
+                      match RustLightSplitExpr.transl_program casted_prog with
+                      | Errors.Error msg -> Errors.Error msg
+                      | Errors.OK split_prog ->
+                          let _ = PrintRustLight.print_if split_prog in
+                          Errors.OK split_prog
 
 (* From CompCert C AST to asm *)
 
@@ -131,7 +159,11 @@ let compile_c_file sourcename ifile ofile =
   let module_name_string = remove_c_extension sourcename in
   let module_name = module_name_string |> String.to_seq |> List.of_seq in
 
-  let csyntax = Hashtbl.find !csyntax_mapping module_name_string in
+  let csyntax =
+    match Hashtbl.find_opt !csyntax_mapping module_name_string with
+    | Some cached -> cached
+    | None -> parse_c_file sourcename ifile
+  in
 
   let project_name = !option_drustlight_name |> String.to_seq |> List.of_seq in
 
@@ -139,21 +171,19 @@ let compile_c_file sourcename ifile ofile =
   PrintRustLight.proj_name := Some !option_drustlight_name;
   PrintRustLight.mod_name := Some module_name_string;
 
-  (match
-     Compiler.print_r_program_from_cfg !sym_mapping !composite_mapping
-       module_name project_name csyntax
-   with
-  | Errors.OK _rprog -> printf "translated!"
-  | Errors.Error msg ->
-      fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg));
+  if !option_drustlight then (
+    match run_rust_pipeline_with_cns csyntax with
+    | Errors.OK _rprog -> printf "translated!"
+    | Errors.Error msg ->
+        fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg);
 
-  PrintRustLight.destination := Some "inserted_main_module.rs";
+    PrintRustLight.destination := Some "inserted_main_module.rs";
 
-  (if !main_mod_name = module_name_string then
-     match Compiler.print_r_main_from_cfg csyntax with
-     | Errors.OK _ -> printf "created generated main function and module"
-     | Errors.Error msg ->
-         fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg));
+    if !main_mod_name = module_name_string then
+      match Compiler.print_r_main_from_cfg csyntax with
+      | Errors.OK _ -> printf "created generated main function and module"
+      | Errors.Error msg ->
+          fatal_error no_loc "error! %s" (C2C.string_of_errmsg msg));
 
   (* TODO this goes in the garbage*)
   (* Convert to Asm *)
@@ -625,12 +655,14 @@ let cmdline_actions =
       ( Suffix ".i",
         Self
           (fun s ->
+            add_to_list s;
             push_action process_i_file s;
             incr num_source_files;
             incr num_input_files) );
       ( Suffix ".p",
         Self
           (fun s ->
+            add_to_list s;
             push_action process_i_file s;
             incr num_source_files;
             incr num_input_files) );

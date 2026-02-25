@@ -14,6 +14,7 @@ Import List.ListNotations.
 Notation "'TODO'" := (ltac:(fail "TODO: implement this")) (at level 0).
 
 Open Scope gensym_monad_scope.
+Open Scope gensym_monad_scope_2.
 
 Inductive DominatorSet : Type
   :=
@@ -73,16 +74,19 @@ Fixpoint postorder_traversal_gen_aux
   match fuel with
   | 0 => error(Errors.msg "Out of fuel")
   | S fuel' =>
-    (* add to visitor set*)
-    let new_seen_nodes := BBSet.add cur_node seen_nodes in
+    if BBSet.mem cur_node seen_nodes
+    then ret (seen_nodes, pot)
+    else
+      (* add to visitor set*)
+      let new_seen_nodes := BBSet.add cur_node seen_nodes in
 
-    (* obtain children *)
-    do (sn, pot) <-
-      recurse_on_children fuel' cfg new_seen_nodes pot cur_node;
+      (* obtain children *)
+      do (sn, pot) <-
+        recurse_on_children fuel' cfg new_seen_nodes pot cur_node;
 
-    (* add to postorder traversal *)
-    let final_postorder := cons cur_node pot in
-    ret (sn, final_postorder)
+      (* add to postorder traversal *)
+      let final_postorder := cons cur_node pot in
+      ret (sn, final_postorder)
   end
 with
   recurse_on_children
@@ -150,15 +154,169 @@ Definition reverse_postorder_traversal_gen
   (cfg: ClightCFG) : mon (list bb_uid * BBMap.t positive)
   :=
   let num_nodes := BBSet.cardinal cfg.(node_set) in
+  (* The DFS helper consumes fuel at multiple recursive layers per visited node
+     (node visit + edge traversal + switch-list traversal). A quadratic budget
+     avoids spurious "Out of fuel" failures on normal CFGs. *)
+  let fuel := S (Nat.mul (S num_nodes) (S num_nodes)) in
   let seen_nodes := BBSet.empty in
   let pot := nil in
   let cur_node := cfg.(entry) in
 
-  do (seen_set, pot) <- postorder_traversal_gen_aux num_nodes cfg seen_nodes pot cur_node;
+  do (seen_set, pot) <- postorder_traversal_gen_aux fuel cfg seen_nodes pot cur_node;
 
   let rpot := rev pot in
 
   ret (rpot, gen_bb_map rpot (BBMap.empty positive) 1).
+
+Definition edge_successors (edge: BBEdge) : list bb_uid :=
+  match edge with
+  | direct nextbb => [nextbb]
+  | conditional _ b_true b_false => [b_true; b_false]
+  | switch _ sl =>
+      let fix sl_successors (sl': switch_list) : list bb_uid :=
+        match sl' with
+        | SLnil b => [b]
+        | SLcons _ b sl'' => b :: sl_successors sl''
+        end
+      in sl_successors sl
+  | terminate _ => []
+  | stub => []
+  end.
+
+Definition add_predecessor
+  (pred succ: bb_uid)
+  (pred_map: BBMap.t BBSet.t)
+  : BBMap.t BBSet.t
+  :=
+  let preds :=
+    match BBMap.find succ pred_map with
+    | Some s => s
+    | None => BBSet.empty
+    end
+  in
+  BBMap.add succ (BBSet.add pred preds) pred_map.
+
+Fixpoint add_predecessors_for_successors
+  (pred: bb_uid)
+  (succs: list bb_uid)
+  (pred_map: BBMap.t BBSet.t)
+  : BBMap.t BBSet.t
+  :=
+  match succs with
+  | [] => pred_map
+  | succ :: rest =>
+      add_predecessors_for_successors pred rest (add_predecessor pred succ pred_map)
+  end.
+
+Definition compute_predecessor_map (cfg: ClightCFG) : BBMap.t BBSet.t :=
+  fold_left
+    (fun (pred_map: BBMap.t BBSet.t) (source: bb_uid) =>
+      match BBMap.find source cfg.(ClightCFG.map) with
+      | Some (bb _ edge) =>
+          add_predecessors_for_successors source (edge_successors edge) pred_map
+      | None => pred_map
+      end)
+    (BBSet.elements cfg.(ClightCFG.node_set))
+    (BBMap.empty BBSet.t).
+
+Definition get_rpo_num (rpo_map: BBMap.t positive) (n: bb_uid) : option positive :=
+  BBMap.find n rpo_map.
+
+Definition is_backward_edge
+  (rpo_map: BBMap.t positive)
+  (source target: bb_uid)
+  : bool
+  :=
+  match get_rpo_num rpo_map source, get_rpo_num rpo_map target with
+  | Some src_num, Some tgt_num => Pos.leb tgt_num src_num
+  | _, _ => false
+  end.
+
+Fixpoint count_forward_predecessors
+  (rpo_map: BBMap.t positive)
+  (node: bb_uid)
+  (preds: list bb_uid)
+  : nat
+  :=
+  match preds with
+  | [] => O
+  | pred :: rest =>
+      let rest_count := count_forward_predecessors rpo_map node rest in
+      if is_backward_edge rpo_map pred node
+      then rest_count
+      else S rest_count
+  end.
+
+Definition is_merge_node
+  (pred_map: BBMap.t BBSet.t)
+  (rpo_map: BBMap.t positive)
+  (node: bb_uid)
+  : bool
+  :=
+  match BBMap.find node pred_map with
+  | Some preds =>
+      let forward_count := count_forward_predecessors rpo_map node (BBSet.elements preds) in
+      Nat.leb 2 forward_count
+  | None => false
+  end.
+
+Definition compute_merge_nodes
+  (cfg: ClightCFG)
+  (pred_map: BBMap.t BBSet.t)
+  (rpo_map: BBMap.t positive)
+  : BBSet.t
+  :=
+  fold_left
+    (fun (merges: BBSet.t) (node: bb_uid) =>
+      if is_merge_node pred_map rpo_map node
+      then BBSet.add node merges
+      else merges)
+    (BBSet.elements cfg.(ClightCFG.node_set))
+    BBSet.empty.
+
+Definition compute_loop_headers
+  (cfg: ClightCFG)
+  (rpo_map: BBMap.t positive)
+  : BBSet.t
+  :=
+  fold_left
+    (fun (headers: BBSet.t) (source: bb_uid) =>
+      match BBMap.find source cfg.(ClightCFG.map) with
+      | Some (bb _ edge) =>
+          fold_left
+            (fun (acc: BBSet.t) (target: bb_uid) =>
+              if is_backward_edge rpo_map source target
+              then BBSet.add target acc
+              else acc)
+            (edge_successors edge)
+            headers
+      | None => headers
+      end)
+    (BBSet.elements cfg.(ClightCFG.node_set))
+    BBSet.empty.
+
+Record StructuredMetadata : Type :=
+  mkStructuredMetadata {
+    sm_rpo_list: list bb_uid;
+    sm_rpo_map: BBMap.t positive;
+    sm_predecessors: BBMap.t BBSet.t;
+    sm_merge_nodes: BBSet.t;
+    sm_loop_headers: BBSet.t;
+  }.
+
+Definition build_structured_metadata (cfg: ClightCFG) : mon StructuredMetadata :=
+  gdo (rpo_list, rpo_map) <- reverse_postorder_traversal_gen cfg;
+  let predecessors := compute_predecessor_map cfg in
+  let merge_nodes := compute_merge_nodes cfg predecessors rpo_map in
+  let loop_headers := compute_loop_headers cfg rpo_map in
+  ret
+    {|
+      sm_rpo_list := rpo_list;
+      sm_rpo_map := rpo_map;
+      sm_predecessors := predecessors;
+      sm_merge_nodes := merge_nodes;
+      sm_loop_headers := loop_headers;
+    |}.
 
 
 (* NOTE: to translate clight expression: Clight.transl_syntax_expr *)
@@ -318,6 +476,87 @@ Definition empty_context : TranslContext :=
     fallthrough := None;
   |}.
 
+Definition inside_context
+  (frame: ContainingSyntax)
+  (context: TranslContext)
+  : TranslContext :=
+  {|
+    enclosing := frame :: context.(enclosing);
+    fallthrough := context.(fallthrough);
+  |}.
+
+Definition with_fallthrough
+  (target: bb_uid)
+  (context: TranslContext)
+  : TranslContext :=
+  {|
+    enclosing := context.(enclosing);
+    fallthrough := Some target;
+  |}.
+
+Fixpoint label_in_context_frames
+  (target: bb_uid)
+  (frames: list ContainingSyntax)
+  : bool
+  :=
+  match frames with
+  | [] => false
+  | IfThenElse :: rest => label_in_context_frames target rest
+  | LoopHeadedBy l :: rest =>
+      if Pos.eqb l target then true else label_in_context_frames target rest
+  | BlockFollowedBy l :: rest =>
+      if Pos.eqb l target then true else label_in_context_frames target rest
+  end.
+
+Definition label_in_context (target: bb_uid) (context: TranslContext) : bool :=
+  label_in_context_frames target context.(enclosing).
+
+Definition is_fallthrough_target (target: bb_uid) (context: TranslContext) : bool :=
+  match context.(fallthrough) with
+  | Some lbl => Pos.eqb lbl target
+  | None => false
+  end.
+
+(* Helper used by upcoming structured translation:
+   - backward edge => continue to loop header
+   - forward edge to merge label => break to block
+   - otherwise inline by caller (None) *)
+Definition structured_jump_for_branch
+  (meta: StructuredMetadata)
+  (source target: bb_uid)
+  (context: TranslContext)
+  : option rstatement
+  :=
+  if is_fallthrough_target target context
+  then Some S_skip
+  else if is_backward_edge meta.(sm_rpo_map) source target
+       then Some (S_continue (Some (Z.pos target)))
+       else if BBSet.mem target meta.(sm_merge_nodes)
+            then Some (S_break (Some (Z.pos target)))
+            else None.
+
+Definition mk_loop_for_header (header: bb_uid) (body: rstatement) : rstatement :=
+  S_loop (Some (Z.pos header)) body S_skip.
+
+Definition mk_block_followed_by (label: bb_uid) (body: rstatement) : rstatement :=
+  S_block (Some (Z.pos label)) body.
+
+Definition choose_structured_branch
+  (meta: StructuredMetadata)
+  (source target: bb_uid)
+  (context: TranslContext)
+  (inline_target: option rstatement)
+  : rstatement
+  :=
+  match structured_jump_for_branch meta source target context with
+  | Some jump_stmt => jump_stmt
+  | None =>
+      match inline_target with
+      | Some stmt => stmt
+      | None => S_skip
+      end
+  end.
+
 (* -------------------- END haskell attempt. Will return to this later -----*)
 
 Local Open Scope gensym_monad_scope_2.
@@ -338,8 +577,169 @@ Definition gen_goto_next_bb
   (cf_lbl_ident: bb_uid) (goto_id: bb_uid) : rstatement :=
   let set_stmt := S_set cf_lbl_ident (bb_to_rexpr goto_id) in
   (* NOTE probably unnecessary in most cases. I could remove it. *)
-  let continue_stmt := S_continue None in
+  let continue_stmt := S_continue (Some (Z.pos cf_lbl_ident)) in
   S_sequence set_stmt continue_stmt.
+
+Fixpoint bb_uid_in_list (target: bb_uid) (labels: list bb_uid) : bool :=
+  match labels with
+  | [] => false
+  | lbl :: rest => if Pos.eqb lbl target then true else bb_uid_in_list target rest
+  end.
+
+Fixpoint next_in_order (target: bb_uid) (ordered_nodes: list bb_uid) : option bb_uid :=
+  match ordered_nodes with
+  | [] => None
+  | [n] => None
+  | n1 :: (n2 :: rest as tl) =>
+      if Pos.eqb n1 target
+      then Some n2
+      else next_in_order target tl
+  end.
+
+Definition doBranch
+  (cf_lbl_ident source target: bb_uid)
+  (next_node: option bb_uid)
+  (context_labels: list bb_uid)
+  : rstatement :=
+  if
+    match next_node with
+    | Some nextbb => Pos.eqb nextbb target
+    | None => false
+    end
+  then S_skip
+  else if bb_uid_in_list target context_labels
+       then S_break (Some (Z.pos target))
+       else gen_goto_next_bb cf_lbl_ident target.
+
+Fixpoint selector_cases (entry_uid: bb_uid) (nodes: list bb_uid) : labeled_rstatements :=
+  match nodes with
+  | [] => LSnil S_skip
+  | node :: rest =>
+      let stmt :=
+        if Pos.eqb node entry_uid
+        then S_skip
+        else S_break (Some (Z.pos node))
+      in
+      LScons (Some (Z.pos node)) stmt (selector_cases entry_uid rest)
+  end.
+
+Fixpoint transl_cfg_to_rustlight_sl_structured
+  (branch_for: bb_uid -> rstatement)
+  (maybe_dflt: option rstatement)
+  (sl: switch_list)
+  : labeled_rstatements :=
+  match sl with
+  | SLnil s' =>
+      LSnil
+        (match maybe_dflt with
+         | Some dflt_stmt => dflt_stmt
+         | None => branch_for s'
+         end)
+  | SLcons maybe_int b sl' =>
+      match maybe_int with
+      | None =>
+          transl_cfg_to_rustlight_sl_structured branch_for (Some (branch_for b)) sl'
+      | Some i =>
+          LScons
+            (Some i)
+            (branch_for b)
+            (transl_cfg_to_rustlight_sl_structured branch_for maybe_dflt sl')
+      end
+  end.
+
+Definition transl_cfg_node_structured
+  (cfg: ClightCFG)
+  (cf_lbl_ident: bb_uid)
+  (cur_node: bb_uid)
+  (next_node: option bb_uid)
+  (context_labels: list bb_uid)
+  (r_ty: type)
+  : SimplExpr.mon rstatement :=
+  gdo block <- get_bb cfg cur_node;
+  match block with
+  | bb insts edge =>
+      gdo transl_insts <- transl_clightcfg_instructions insts;
+      let branch_for := fun target => doBranch cf_lbl_ident cur_node target next_node context_labels in
+      gdo transl_edge <-
+      match edge with
+      | direct target =>
+          ret (branch_for target)
+      | conditional cexp b_true b_false =>
+          gdo r_cexp <- transl_syntax_expr cexp;
+          ret (S_if_then_else r_cexp (branch_for b_true) (branch_for b_false))
+      | terminate maybe_exp =>
+          match maybe_exp with
+          | Some exp =>
+              gdo e <- transl_syntax_expr exp;
+              ret (S_return (Some (e, r_typeof e)))
+          | None =>
+              ret
+                (match r_ty with
+                 | Tvoid => S_return None
+                 | _ => S_skip
+                 end)
+          end
+      | switch cexp sl =>
+          gdo tr_exp <- transl_syntax_expr cexp;
+          let lrs := transl_cfg_to_rustlight_sl_structured branch_for None sl in
+          ret (S_match_int tr_exp lrs)
+      | stub => SimplExpr.error (Errors.msg "stub edge encountered")
+      end;
+      ret (S_sequence transl_insts transl_edge)
+  end.
+
+Fixpoint nodeWithin
+  (cfg: ClightCFG)
+  (cf_lbl_ident: bb_uid)
+  (r_ty: type)
+  (ordered_nodes: list bb_uid)
+  (entry_uid: bb_uid)
+  (follows_desc: list bb_uid)
+  (context_labels: list bb_uid)
+  : SimplExpr.mon rstatement :=
+  match follows_desc with
+  | [] =>
+      gdo base_stmt <-
+        transl_cfg_node_structured
+          cfg
+          cf_lbl_ident
+          entry_uid
+          (next_in_order entry_uid ordered_nodes)
+          context_labels
+          r_ty;
+      let selector :=
+        S_match_int
+          (Etempvar cf_lbl_ident bbuid_ty)
+          (selector_cases entry_uid ordered_nodes)
+      in
+      ret (S_sequence selector base_stmt)
+  | y_n :: ys =>
+      gdo inner <- nodeWithin cfg cf_lbl_ident r_ty ordered_nodes entry_uid ys (y_n :: context_labels);
+      gdo y_stmt <-
+        transl_cfg_node_structured
+          cfg
+          cf_lbl_ident
+          y_n
+          (next_in_order y_n ordered_nodes)
+          context_labels
+          r_ty;
+      ret (S_sequence (S_block (Some (Z.pos y_n)) inner) y_stmt)
+  end.
+
+Definition doTree
+  (cfg: ClightCFG)
+  (cf_lbl_ident: bb_uid)
+  (r_ty: type)
+  (ordered_nodes: list bb_uid)
+  : SimplExpr.mon rstatement :=
+  let entry_uid := cfg.(entry) in
+  let rest_nodes :=
+    filter
+      (fun n => negb (Pos.eqb n entry_uid))
+      ordered_nodes
+  in
+  let follows_desc := rev rest_nodes in
+  nodeWithin cfg cf_lbl_ident r_ty (entry_uid :: rest_nodes) entry_uid follows_desc [].
 
 Fixpoint transl_cfg_to_rustlight_sl
   (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (maybe_dflt: option rstatement) (sl: switch_list)
@@ -425,7 +825,7 @@ Fixpoint transl_cfg_nodes_to_rustlight (cfg: ClightCFG) (cf_lbl_ident: bb_uid) (
       ret (LSnil S_skip)
   end.
 
-Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon rstatement :=
+Definition transl_cfg_to_rustlight_dispatcher (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon rstatement :=
   gdo cf_lbl_ident <- SimplExpr.gensym bbuid_ty;
   let entry_uid := cfg.(entry) in
   let s_stmt := S_set cf_lbl_ident (bb_to_rexpr entry_uid) in
@@ -435,9 +835,23 @@ Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon
   (*transl_cfg_to_rustlight_aux cfg cfg.(entry) entry_uid.*)
   gdo r_list <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident (BBSet.elements nodes) r_ty;
   let m_stmt := S_match_int (Etempvar cf_lbl_ident bbuid_ty) r_list in
-  let l_stmt := S_loop None m_stmt S_skip in
+  let l_stmt := S_loop (Some (Z.pos cf_lbl_ident)) m_stmt S_skip in
   let seq_stmt := S_sequence s_stmt l_stmt in
   ret seq_stmt.
+
+Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon rstatement :=
+  gdo meta <- build_structured_metadata cfg;
+  gdo cf_lbl_ident <- SimplExpr.gensym bbuid_ty;
+  match meta.(sm_rpo_list) with
+  | [] =>
+      transl_cfg_to_rustlight_dispatcher cfg r_ty
+  | _ =>
+      gdo tree_body <- doTree cfg cf_lbl_ident r_ty meta.(sm_rpo_list);
+      let s_stmt := S_set cf_lbl_ident (bb_to_rexpr cfg.(entry)) in
+      let loop_body := S_sequence tree_body (S_continue (Some (Z.pos cf_lbl_ident))) in
+      let l_stmt := S_loop (Some (Z.pos cf_lbl_ident)) loop_body S_skip in
+      ret (S_sequence s_stmt l_stmt)
+  end.
 
 Print calling_convention.
 Print r_calling_convention.

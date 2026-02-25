@@ -195,6 +195,7 @@ Inductive rstatement: Type :=
   | S_builtin: option ident -> external_function -> typelist -> list rexpr -> rstatement
   | S_sequence : rstatement -> rstatement -> rstatement
   | S_if_then_else : rexpr  -> rstatement -> rstatement -> rstatement
+  | S_block: option Z -> rstatement -> rstatement
   | S_loop: option Z -> rstatement -> rstatement -> rstatement
   (* outer lbl -> inner lbl -> block 1 -> block 2*)
   (* loop 'outer_lbl {loop 'inner_lbl {block 1; break; } block 2} *)
@@ -393,6 +394,7 @@ Fixpoint walk_r_body_for_symbols
       )
   | S_sequence s_1 s_2 => PositiveSet.union (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_continue _ => PositiveSet.empty
+  | S_block _ s_1 => walk_r_stmt s_1
   | S_loop _ s_1 s_2 => PositiveSet.union (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_loop2 _ _ s_1 s_2 => PositiveSet.union (walk_r_stmt s_1) (walk_r_stmt s_2)
   | S_match_int rexpr ls =>
@@ -504,6 +506,8 @@ Fixpoint walk_r_stmt_for_composite_types (stmt: rstatement) : PositiveSet.t :=
   | S_sequence s_1 s_2 =>
       PositiveSet.union (walk_r_stmt_for_composite_types s_1) (walk_r_stmt_for_composite_types s_2)
   | S_continue _ => PositiveSet.empty
+  | S_block _ s_1 =>
+      walk_r_stmt_for_composite_types s_1
   | S_loop _ s_1 s_2 =>
       PositiveSet.union (walk_r_stmt_for_composite_types s_1) (walk_r_stmt_for_composite_types s_2)
   | S_loop2 _ _ s_1 s_2 =>

@@ -468,6 +468,9 @@ Fixpoint insert_cast_stmt (gvt: ident -> res type) (f_rty: type) (stmt: rstateme
       do r_exp1 <- insert_cast_stmt gvt f_rty exp1;
       do r_exp2 <- insert_cast_stmt gvt f_rty exp2;
       ret (S_sequence r_exp1 r_exp2)
+  | S_block l s =>
+      do rs <- insert_cast_stmt gvt f_rty s;
+      ret (S_block l rs)
   | S_return None => ret(stmt)
   | S_return (Some (exp, ty)) =>
     let exp_ty := r_typeof exp in
@@ -590,4 +593,3 @@ Definition transl_program (r_prog: r_program) : res (r_program) :=
       Ctypes.prog_comp_env_eq := r_prog.(prog_comp_env_eq);
     |} in
   OK(r_prog).
-
