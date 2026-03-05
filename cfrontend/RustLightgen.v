@@ -517,6 +517,14 @@ Definition is_fallthrough_target (target: bb_uid) (context: TranslContext) : boo
   | None => false
   end.
 
+(* Keep control labels and block labels disjoint in emitted Rust:
+   control labels are even, block labels are odd. *)
+Definition encode_control_label (uid: positive) : Z :=
+  Z.mul (Z.pos uid) 2.
+
+Definition encode_block_label (uid: bb_uid) : Z :=
+  Z.succ (encode_control_label uid).
+
 (* Helper used by upcoming structured translation:
    - backward edge => continue to loop header
    - forward edge to merge label => break to block
@@ -530,16 +538,16 @@ Definition structured_jump_for_branch
   if is_fallthrough_target target context
   then Some S_skip
   else if is_backward_edge meta.(sm_rpo_map) source target
-       then Some (S_continue (Some (Z.pos target)))
+       then Some (S_continue (Some (encode_block_label target)))
        else if BBSet.mem target meta.(sm_merge_nodes)
-            then Some (S_break (Some (Z.pos target)))
+            then Some (S_break (Some (encode_block_label target)))
             else None.
 
 Definition mk_loop_for_header (header: bb_uid) (body: rstatement) : rstatement :=
-  S_loop (Some (Z.pos header)) body S_skip.
+  S_loop (Some (encode_block_label header)) body S_skip.
 
 Definition mk_block_followed_by (label: bb_uid) (body: rstatement) : rstatement :=
-  S_block (Some (Z.pos label)) body.
+  S_block (Some (encode_block_label label)) body.
 
 Definition choose_structured_branch
   (meta: StructuredMetadata)
@@ -577,7 +585,7 @@ Definition gen_goto_next_bb
   (cf_lbl_ident: bb_uid) (goto_id: bb_uid) : rstatement :=
   let set_stmt := S_set cf_lbl_ident (bb_to_rexpr goto_id) in
   (* NOTE probably unnecessary in most cases. I could remove it. *)
-  let continue_stmt := S_continue (Some (Z.pos cf_lbl_ident)) in
+  let continue_stmt := S_continue (Some (encode_control_label cf_lbl_ident)) in
   S_sequence set_stmt continue_stmt.
 
 Fixpoint bb_uid_in_list (target: bb_uid) (labels: list bb_uid) : bool :=
@@ -608,7 +616,7 @@ Definition doBranch
     end
   then S_skip
   else if bb_uid_in_list target context_labels
-       then S_break (Some (Z.pos target))
+       then S_break (Some (encode_block_label target))
        else gen_goto_next_bb cf_lbl_ident target.
 
 Fixpoint selector_cases (entry_uid: bb_uid) (nodes: list bb_uid) : labeled_rstatements :=
@@ -618,7 +626,7 @@ Fixpoint selector_cases (entry_uid: bb_uid) (nodes: list bb_uid) : labeled_rstat
       let stmt :=
         if Pos.eqb node entry_uid
         then S_skip
-        else S_break (Some (Z.pos node))
+        else S_break (Some (encode_block_label node))
       in
       LScons (Some (Z.pos node)) stmt (selector_cases entry_uid rest)
   end.
@@ -723,7 +731,7 @@ Fixpoint nodeWithin
           (next_in_order y_n ordered_nodes)
           context_labels
           r_ty;
-      ret (S_sequence (S_block (Some (Z.pos y_n)) inner) y_stmt)
+      ret (S_sequence (S_block (Some (encode_block_label y_n)) inner) y_stmt)
   end.
 
 Definition doTree
@@ -835,7 +843,7 @@ Definition transl_cfg_to_rustlight_dispatcher (cfg: ClightCFG) (r_ty: type) : Si
   (*transl_cfg_to_rustlight_aux cfg cfg.(entry) entry_uid.*)
   gdo r_list <- transl_cfg_nodes_to_rustlight cfg cf_lbl_ident (BBSet.elements nodes) r_ty;
   let m_stmt := S_match_int (Etempvar cf_lbl_ident bbuid_ty) r_list in
-  let l_stmt := S_loop (Some (Z.pos cf_lbl_ident)) m_stmt S_skip in
+  let l_stmt := S_loop (Some (encode_control_label cf_lbl_ident)) m_stmt S_skip in
   let seq_stmt := S_sequence s_stmt l_stmt in
   ret seq_stmt.
 
@@ -848,8 +856,8 @@ Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon
   | _ =>
       gdo tree_body <- doTree cfg cf_lbl_ident r_ty meta.(sm_rpo_list);
       let s_stmt := S_set cf_lbl_ident (bb_to_rexpr cfg.(entry)) in
-      let loop_body := S_sequence tree_body (S_continue (Some (Z.pos cf_lbl_ident))) in
-      let l_stmt := S_loop (Some (Z.pos cf_lbl_ident)) loop_body S_skip in
+      let loop_body := S_sequence tree_body (S_continue (Some (encode_control_label cf_lbl_ident))) in
+      let l_stmt := S_loop (Some (encode_control_label cf_lbl_ident)) loop_body S_skip in
       ret (S_sequence s_stmt l_stmt)
   end.
 
