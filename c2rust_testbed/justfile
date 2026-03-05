@@ -2,20 +2,30 @@ clean:
   rm -rf $(find . -name "rust_project")
 
 build *name:
-  pushd {{name}}
-  ccomp  -L{{env_var('RUNTIME')}} -lm -drustlight $(find . -type f -name "*.c" ! -name "*light.c")
-  mkdir -p {{name}}/tests
-  cp *.rs {{name}}/tests
-  popd
+  cd {{name}} && \
+    CCOMP_BIN="${CCOMP:-$(command -v ccomp || true)}"; \
+    if [ -z "$CCOMP_BIN" ] && [ -x ../../_build/install/default/bin/ccomp ]; then CCOMP_BIN=../../_build/install/default/bin/ccomp; fi; \
+    if [ -z "$CCOMP_BIN" ]; then echo "ccomp not found. Set CCOMP or add it to PATH."; exit 1; fi; \
+    if [ "$(uname -s)" = "Darwin" ]; then \
+      "$CCOMP_BIN" -S -fpacked-structs -fstruct-passing -funstructured-switch -std=c18 -L{{env_var('RUNTIME')}} -lm -drustlight \
+        -Xpreprocessor -arch -Xpreprocessor arm64 \
+        -Xpreprocessor -U__clang__ -Xpreprocessor -U__BLOCKS__ \
+        -Xpreprocessor '-D__attribute__(x)=' -Xpreprocessor '-D__asm(x)=' \
+        -Xpreprocessor '-D_Nullable=' -Xpreprocessor '-D_Nonnull=' \
+        -Xpreprocessor '-D__DARWIN_OS_INLINE=static inline' \
+        -Xpreprocessor '-Wno-#warnings' \
+        -Xpreprocessor '-D__uint128_t=unsigned long long' \
+        $(find . -type f -name "*.c" ! -name "*light.c"); \
+    else \
+      "$CCOMP_BIN" -S -fpacked-structs -fstruct-passing -funstructured-switch -std=c18 -L{{env_var('RUNTIME')}} -lm -drustlight \
+        $(find . -type f -name "*.c" ! -name "*light.c"); \
+    fi && \
+    mkdir -p rust_project/tests && cp *.rs rust_project/tests/
 
 compile *name:
   just build {{name}}
-  pushd {{name}}
-  cargo build
-  popd
+  cd {{name}}/rust_project && cargo build
 
 test *name:
   just compile {{name}}
-  pushd {{name}}
-  cargo test
-  popd
+  cd {{name}}/rust_project && cargo test

@@ -83,6 +83,9 @@
 .nra.cache
 .csdp.cache
 rust_projects/*
+/c2rust_testbed/*/*.s
+/c2rust_testbed/*/rust_project/
+/c2rust_testbed/*/tests/
 
 # Dune Build Results
 _build/

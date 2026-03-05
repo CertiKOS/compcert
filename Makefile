@@ -245,18 +245,21 @@ documentation: $(FILES)
 	coq2html -d doc/html/ -base compcert -short-names doc/*.glob \
           $(filter-out doc/coq2html cparser/Parser.v, $^)
 
-tools/ndfun: tools/ndfun.ml
+tools/%.cmi: tools/%.mli
+	ocamlc -c -I tools $<
+
+tools/ndfun: tools/ndfun.cmi tools/ndfun.ml
 ifeq ($(OCAML_NATIVE_COMP),true)
-	ocamlopt -o tools/ndfun str.cmxa tools/ndfun.ml
+	ocamlopt -I tools -o tools/ndfun str.cmxa tools/ndfun.ml
 else
-	ocamlc -o tools/ndfun str.cma tools/ndfun.ml
+	ocamlc -I tools -o tools/ndfun str.cma tools/ndfun.ml
 endif
 
-tools/modorder: tools/modorder.ml
+tools/modorder: tools/modorder.cmi tools/modorder.ml
 ifeq ($(OCAML_NATIVE_COMP),true)
-	ocamlopt -o tools/modorder str.cmxa tools/modorder.ml
+	ocamlopt -I tools -o tools/modorder str.cmxa tools/modorder.ml
 else
-	ocamlc -o tools/modorder str.cma tools/modorder.ml
+	ocamlc -I tools -o tools/modorder str.cma tools/modorder.ml
 endif
 
 latexdoc:

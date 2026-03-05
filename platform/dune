@@ -84,35 +84,35 @@
 
 (subdir
  backend
- (copy_files %{project_root}/backend/*))
+ (copy_files %{project_root}/backend/*.{v,vp,ml,mli}))
 
 (subdir
  cfrontend
- (copy_files %{project_root}/cfrontend/*.{v,vp,ml,mli,mll,mly}*))
+ (copy_files %{project_root}/cfrontend/*.{v,vp,ml,mli,mll,mly}))
 
 (subdir
  common
- (copy_files %{project_root}/common/*))
+ (copy_files %{project_root}/common/*.{v,ml,mli}))
 
 (subdir
  cparser
- (copy_files %{project_root}/cparser/*))
+ (copy_files %{project_root}/cparser/*.{v,vy,mly,mll,ml,mli,messages}))
 
 (subdir
  debug
- (copy_files %{project_root}/debug/*))
+ (copy_files %{project_root}/debug/*.{ml,mli}))
 
 (subdir
  driver
- (copy_files %{project_root}/driver/*))
+ (copy_files %{project_root}/driver/*.{v,ml,mli,html}))
 
 (subdir
  export
- (copy_files %{project_root}/export/*))
+ (copy_files %{project_root}/export/*.{v,ml,md}))
 
 (subdir
  lib
- (copy_files %{project_root}/lib/*))
+ (copy_files %{project_root}/lib/*.{v,ml,mli,mll}))
 
 ; Run preprocessing directives on .vp files
 

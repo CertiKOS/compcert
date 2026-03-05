@@ -4,7 +4,22 @@ test: build
   pushd rust_project && cargo test && popd
 
 build: clean
-  ccomp -fpacked-structs -fstruct-passing -funstructured-switch -std=c18 -drustlight -L../../runtime/ -lm -I/nix/store/gvkk2m282cqh6m7yh4qrz3d7yhzlsd0i-clang-17.0.6-lib/lib/clang/17/include/ -I/nix/store/s3pvsv4as7mc8i2nwnk2hnsyi2qdj4bq-glibc-2.39-31-dev/include -rust-edition {{edition}} *.c
+  CCOMP_BIN="${CCOMP:-$(command -v ccomp || true)}"; \
+  if [ -z "$CCOMP_BIN" ] && [ -x ../../_build/install/default/bin/ccomp ]; then CCOMP_BIN=../../_build/install/default/bin/ccomp; fi; \
+  if [ -z "$CCOMP_BIN" ]; then echo "ccomp not found. Set CCOMP or add it to PATH."; exit 1; fi; \
+  if [ "$(uname -s)" = "Darwin" ]; then \
+    "$CCOMP_BIN" -S -fpacked-structs -fstruct-passing -funstructured-switch -std=c18 -drustlight -L../../runtime/ -lm -rust-edition {{edition}} \
+      -Xpreprocessor -arch -Xpreprocessor arm64 \
+      -Xpreprocessor -U__clang__ -Xpreprocessor -U__BLOCKS__ \
+      -Xpreprocessor '-D__attribute__(x)=' -Xpreprocessor '-D__asm(x)=' \
+      -Xpreprocessor '-D_Nullable=' -Xpreprocessor '-D_Nonnull=' \
+      -Xpreprocessor '-D__DARWIN_OS_INLINE=static inline' \
+      -Xpreprocessor '-Wno-#warnings' \
+      -Xpreprocessor '-D__uint128_t=unsigned long long' \
+      *.c; \
+  else \
+    "$CCOMP_BIN" -S -fpacked-structs -fstruct-passing -funstructured-switch -std=c18 -drustlight -L../../runtime/ -lm -rust-edition {{edition}} *.c; \
+  fi
   mkdir -p rust_project/tests
   cp *.rs rust_project/tests/
 

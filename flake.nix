@@ -131,9 +131,12 @@
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests -Astatic_mut_refs";
           shellHook = ''
-            export PATH="$PATH:$PWD/_build/install/x86_64/bin/"
-            export "RUNTIME=$PWD/runtime"
-            export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
+            export PATH="$PATH:$PWD/_build/install/default/bin:$PWD"
+            export RUNTIME="$PWD/runtime"
+            if [ ! -f "$PWD/compcert.ini" ] && [ -f "$PWD/Makefile.config" ]; then
+              make compcert.ini >/dev/null
+            fi
+            export COMPCERT_CONFIG="$PWD/compcert.ini"
           '';
           packages =
             baseBuildInputs
@@ -190,9 +193,12 @@
 
         devShells.staticShell = pkgs.pkgsMusl.mkShell {
           shellHook = ''
-            export "RUNTIME=$PWD/runtime"
-            export PATH="$PATH:$PWD/_build/install/x86_64/bin/"
-            export COMPCERT_CONFIG="$PWD/_build/x86_64/compcert.ini"
+            export RUNTIME="$PWD/runtime"
+            export PATH="$PATH:$PWD/_build/install/default/bin:$PWD"
+            if [ ! -f "$PWD/compcert.ini" ] && [ -f "$PWD/Makefile.config" ]; then
+              make compcert.ini >/dev/null
+            fi
+            export COMPCERT_CONFIG="$PWD/compcert.ini"
           '';
           STATIC_BUILD = "1";
           buildInputs = (
@@ -231,11 +237,15 @@
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           RUSTFLAGS = "-Awarnings -Cpanic=abort -Zpanic-abort-tests";
           shellHook = ''
-            export PATH="$PATH:$PWD"
-            export "RUNTIME=$PWD/runtime"
+            export PATH="$PATH:$PWD/_build/install/default/bin:$PWD"
+            export RUNTIME="$PWD/runtime"
+            if [ ! -f "$PWD/compcert.ini" ] && [ -f "$PWD/Makefile.config" ]; then
+              make compcert.ini >/dev/null
+            fi
+            export COMPCERT_CONFIG="$PWD/compcert.ini"
           '';
           buildInputs = baseBuildInputs ++ [ rust_tc_2021 ];
-          COMPCERT_CONFIG = "_build/x86_64/compcert.ini";
+          COMPCERT_CONFIG = "compcert.ini";
         };
       }
     );

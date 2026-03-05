@@ -98,32 +98,15 @@ and doublequote = parse
 (* The entry point *)
 
 let read_config_file filename =
-  Hashtbl.add key_val_tbl "prepro" ["gcc"];
-  Hashtbl.add key_val_tbl "stdlib_path" ["/usr/local/lib/compcert"];
-  Hashtbl.add key_val_tbl "linker" ["gcc"];
-  Hashtbl.add key_val_tbl "asm" ["gcc"];
-  Hashtbl.add key_val_tbl "prepro_options" ["-m64"; "-U__GNUC__"; "-U__SIZEOF_INT128__"; "-E"];
-  Hashtbl.add key_val_tbl "asm_options" ["-m64"; "-c"];
-  Hashtbl.add key_val_tbl "linker_options" ["-m64"];
-  Hashtbl.add key_val_tbl "arch" ["x86"];
-  Hashtbl.add key_val_tbl "model" ["64"];
-  Hashtbl.add key_val_tbl "abi" ["standard"];
-  Hashtbl.add key_val_tbl "endianness" ["little"];
-  Hashtbl.add key_val_tbl "system" ["linux"];
-  Hashtbl.add key_val_tbl "has_runtime_lib" ["true"];
-  Hashtbl.add key_val_tbl "has_standard_headers" ["true"];
-  Hashtbl.add key_val_tbl "has_double" ["true"];
-  Hashtbl.add key_val_tbl "asm_supports_cfi" ["true"];
-  Hashtbl.add key_val_tbl "response_file_style" ["gnu"]
-  (* let ic = open_in_bin filename in *)
-  (* let lexbuf = Lexing.from_channel ic in *)
-  (* Lexing.(lexbuf.lex_start_p <- {lexbuf.lex_start_p with pos_fname = filename}); *)
-  (* try *)
-  (*   Hashtbl.clear key_val_tbl; *)
-  (*   begline lexbuf; *)
-  (*   close_in ic *)
-  (* with x -> *)
-  (*   close_in ic; raise x *)
+  let ic = open_in_bin filename in
+  let lexbuf = Lexing.from_channel ic in
+  Lexing.(lexbuf.lex_start_p <- {lexbuf.lex_start_p with pos_fname = filename});
+  try
+    Hashtbl.clear key_val_tbl;
+    begline lexbuf;
+    close_in ic
+  with x ->
+    close_in ic; raise x
 
 (* Test harness *)
 (*

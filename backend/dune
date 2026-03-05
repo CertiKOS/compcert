@@ -1,10 +1,11 @@
-; apply preprocessor to .vp files
-(rule
- (action
-  (with-stdout-to SelectDiv.v
-   (run ndfun %{dep:SelectDiv.vp}))))
-
-(rule
- (action
-  (with-stdout-to SplitLong.v
-   (run ndfun %{dep:SplitLong.vp}))))
+; SelectDiv.v and SplitLong.v are checked into source control.
+; Regenerating them in dune causes duplicate-target conflicts.
+;(rule
+; (action
+;  (with-stdout-to SelectDiv.v
+;   (run ndfun %{dep:SelectDiv.vp}))))
+;
+;(rule
+; (action
+;  (with-stdout-to SplitLong.v
+;   (run ndfun %{dep:SplitLong.vp}))))

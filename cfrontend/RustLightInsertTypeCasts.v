@@ -89,6 +89,15 @@ Definition gen_cast_for_conditional
   | ty => Error(msg (String.append " Expected scalar or pointer type in condition. Got unexpected type: " (type_to_string ty)))
   end.
 
+Definition decay_array_type (ty: type) : type :=
+  match ty with
+  | Ctypes.Tarray inner_ty _len attrs => Ctypes.Tpointer inner_ty attrs
+  | _ => ty
+  end.
+
+Definition decay_array_expr (e: rexpr) : rexpr :=
+  Ecast e (decay_array_type (r_typeof e)).
+
 (* this does general type coersions*)
 (* "implict to explicit type coersion" *)
 Definition i2etc
@@ -334,11 +343,14 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
       do unused <- check_ty ty;
       do rexp1 <- insert_cast_expr exp1;
       do rexp2 <- insert_cast_expr exp2;
+      let rexp1 := decay_array_expr rexp1 in
+      let rexp2 := decay_array_expr rexp2 in
+      let desired_ty := decay_array_type ty in
       (* TODO this is obfuscated. Can just do the casting directly *)
       do (c_rexp1, c_rexp2, rty) <-
         match do_binop_coersion (r_typeof rexp1) (r_typeof rexp2) with
         | NC_first f rty =>
-            do res <- f rexp1;
+          do res <- f rexp1;
             ret(res, rexp2, rty)
         | NC_second f rty =>
             do res <- f rexp2;
@@ -360,11 +372,11 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
              to an int to match the C semantics *)
           let conditional := Ebinop op c_rexp1 c_rexp2 cond_type in
           let final_binop := Ecast conditional bang_type in
-          i2etc bang_type ty final_binop
+          i2etc bang_type desired_ty final_binop
         )
       else
         let final_binop := Ebinop op c_rexp1 c_rexp2 rty in
-        i2etc (r_typeof final_binop) (ty) final_binop
+        i2etc (r_typeof final_binop) desired_ty final_binop
 
   (* this shouldn't exist *)
   | Enull_check _ty => ret(e)

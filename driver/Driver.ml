@@ -121,20 +121,17 @@ let run_rust_pipeline_with_cns (csyntax : Csyntax.program) :
       match ClightCFG.transl_program clight with
       | Errors.Error msg -> Errors.Error msg
       | Errors.OK cfg ->
-          match ClightCFGCNS.transl_program cfg with
+          match RustLightgen.transl_program cfg with
           | Errors.Error msg -> Errors.Error msg
-          | Errors.OK cfg' ->
-              match RustLightgen.transl_program cfg' with
+          | Errors.OK r_prog ->
+              match RustLightInsertTypeCasts.transl_program r_prog with
               | Errors.Error msg -> Errors.Error msg
-              | Errors.OK r_prog ->
-                  match RustLightInsertTypeCasts.transl_program r_prog with
+              | Errors.OK casted_prog ->
+                  match RustLightSplitExpr.transl_program casted_prog with
                   | Errors.Error msg -> Errors.Error msg
-                  | Errors.OK casted_prog ->
-                      match RustLightSplitExpr.transl_program casted_prog with
-                      | Errors.Error msg -> Errors.Error msg
-                      | Errors.OK split_prog ->
-                          let _ = PrintRustLight.print_if split_prog in
-                          Errors.OK split_prog
+                  | Errors.OK split_prog ->
+                      let _ = PrintRustLight.print_if split_prog in
+                      Errors.OK split_prog
 
 (* From CompCert C AST to asm *)
 

@@ -7,10 +7,13 @@
 ; (modules Parser)
 ; (flags --coq --coq-no-version-check))
 
-(rule
- (targets Parser.v)
- (action
-  (run menhir --coq --coq-no-version-check %{dep:Parser.vy})))
+; Parser.v is checked into the repository for the current workflow.
+; Regenerating it in dune conflicts with the existing source file on macOS.
+; Keep this rule disabled unless/ until Parser.v is removed from source control.
+;(rule
+; (targets Parser.v)
+; (action
+;  (run menhir --coq --coq-no-version-check %{dep:Parser.vy})))
 
 (ocamllex Lexer)
 
