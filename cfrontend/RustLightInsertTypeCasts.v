@@ -89,6 +89,7 @@ Definition gen_cast_for_conditional
   | ty => Error(msg (String.append " Expected scalar or pointer type in condition. Got unexpected type: " (type_to_string ty)))
   end.
 
+(* C array expressions decay to pointers before binary-op coercion. *)
 Definition decay_array_type (ty: type) : type :=
   match ty with
   | Ctypes.Tarray inner_ty _len attrs => Ctypes.Tpointer inner_ty attrs
@@ -343,8 +344,10 @@ Fixpoint insert_cast_expr (e: rexpr) : res rexpr
       do unused <- check_ty ty;
       do rexp1 <- insert_cast_expr exp1;
       do rexp2 <- insert_cast_expr exp2;
+      (* Normalize array operands to pointer form before type harmonization. *)
       let rexp1 := decay_array_expr rexp1 in
       let rexp2 := decay_array_expr rexp2 in
+      (* Rust side cannot preserve array rvalues here; use the decayed result type. *)
       let desired_ty := decay_array_type ty in
       (* TODO this is obfuscated. Can just do the casting directly *)
       do (c_rexp1, c_rexp2, rty) <-

@@ -121,6 +121,7 @@ let run_rust_pipeline_with_cns (csyntax : Csyntax.program) :
       match ClightCFG.transl_program clight with
       | Errors.Error msg -> Errors.Error msg
       | Errors.OK cfg ->
+          (* RustLightgen consumes ClightCFG directly in this extracted pipeline. *)
           match RustLightgen.transl_program cfg with
           | Errors.Error msg -> Errors.Error msg
           | Errors.OK r_prog ->
