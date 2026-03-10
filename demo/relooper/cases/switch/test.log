@@ -1,0 +1,12 @@
+    Updating crates.io index
+     Locking 1 package to latest Rust 1.87.0-nightly compatible version
+   Compiling libc v0.2.183
+   Compiling rust_project v0.0.0 (/private/tmp/compcert-rust-cns/demo/relooper/cases/switch/rust_project)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.47s
+     Running tests/test_switch.rs (/private/tmp/compcert-rust-cns/demo/relooper/.cargo-target/switch/debug/deps/test_switch-134bbb954e10b781)
+
+running 1 test
+test test_switch ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
