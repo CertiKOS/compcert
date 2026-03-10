@@ -185,6 +185,9 @@ Fixpoint transl_stmt (s: rstatement) : mon rstatement :=
       gdo tr_s1 <- transl_stmt s1;
       gdo tr_s2 <- transl_stmt s2;
       ret(S_sequence tr_s1 tr_s2)
+  | S_block l s1 =>
+      gdo tr_s1 <- transl_stmt s1;
+      ret (S_block l tr_s1)
   | S_if_then_else cond s1 s2 =>
       gdo tr_s1 <- transl_stmt s1;
       gdo tr_s2 <- transl_stmt s2;

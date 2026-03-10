@@ -791,6 +791,10 @@ let rec print_stmt fmt body =
   | S_sequence (RustLight.S_skip, s2) -> print_stmt fmt s2
   | S_sequence (s1, RustLight.S_skip) -> print_stmt fmt s1
   | S_sequence (e1, e2) -> fprintf fmt "%a@;%a" print_stmt e1 print_stmt e2
+  | S_block (Some lbl, stmt) ->
+      fprintf fmt "@[<v 2>'lbl_%ld: {@;%a@;<0 -2>}@]"
+        (camlint_of_coqint lbl) print_stmt stmt
+  | S_block (None, stmt) -> fprintf fmt "@[<v 2>{@;%a@;<0 -2>}@]" print_stmt stmt
   | S_continue None -> fprintf fmt "continue;"
   | S_continue (Some lbl) ->
       fprintf fmt "continue 'lbl_%ld;" (camlint_of_coqint lbl)

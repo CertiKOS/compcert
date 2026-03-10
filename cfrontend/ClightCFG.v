@@ -55,8 +55,6 @@ Module LBLMap := Coq.FSets.FMapList.Make(Positive_as_OT).
 (* set of bb_uids *)
 Module BBSet <: FSets.FSetInterface.S := FSets.FSetPositive.PositiveSet.
 
-
-
 Inductive Instruction :=
   | i_skip : Instruction
   | i_assign : Clight.expr -> Clight.expr -> Instruction

@@ -7,55 +7,174 @@
 ; Copy all files from currently selected architecture to "TargetPlatformCopy" directory.
 ; Can't copy processed .vp files from platform directories due to dependency cycle -> generate later in preprocess.dune.
 ; a.d. TODO are these aliases used at all?
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} ppc)) (files %{project_root}/powerpc/*)))
 
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} ppc))
+  (files %{project_root}/powerpc/*.{v,vp,ml,mli})))
 
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} x86_32)) (files %{project_root}/x86/*.{v,vp,ml,mli})))
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} x86_32)) (files %{project_root}/x86_32/*.{v,vp,ml,mli})))
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} x86_32))
+  (files %{project_root}/x86/*.{v,vp,ml,mli})))
 
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} x86_64)) (files %{project_root}/x86/*.{v,vp,ml,mli})))
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} x86_64)) (files %{project_root}/x86_64/*.{v,vp,ml,mli})))
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} x86_32))
+  (files %{project_root}/x86_32/*.{v,vp,ml,mli})))
 
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} x86_64))
+  (files %{project_root}/x86/*.{v,vp,ml,mli})))
 
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} riscV)) (files %{project_root}/riscV/*)))
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} x86_64))
+  (files %{project_root}/x86_64/*.{v,vp,ml,mli})))
 
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} riscV))
+  (files %{project_root}/riscV/*.{v,vp,ml,mli})))
 
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} arm)) (files %{project_root}/arm/*)))
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} arm))
+  (files %{project_root}/arm/*.{v,vp,ml,mli})))
 
-(subdir TargetPlatformCopy
- (copy_files (alias target_platform) (only_sources) (enabled_if (= %{env:TARGET_PLATFORM=ppc} aarch64)) (files %{project_root}/aarch64/*)))
+(subdir
+ TargetPlatformCopy
+ (copy_files
+  (alias target_platform)
+  (only_sources)
+  (enabled_if
+   (= %{env:TARGET_PLATFORM=ppc} aarch64))
+  (files %{project_root}/aarch64/*.{v,vp,ml,mli})))
 
 ; copy files from all other relevant source directories
-(subdir backend (copy_files %{project_root}/backend/*))
-(subdir cfrontend (copy_files %{project_root}/cfrontend/*))
-(subdir common (copy_files %{project_root}/common/*))
-(subdir cparser (copy_files %{project_root}/cparser/*))
-(subdir debug (copy_files %{project_root}/debug/*))
-(subdir driver (copy_files %{project_root}/driver/*))
-(subdir export (copy_files %{project_root}/export/*))
-(subdir lib (copy_files %{project_root}/lib/*))
 
+(subdir
+ backend
+ (copy_files
+  (only_sources)
+  (files %{project_root}/backend/*.{v,vp,ml,mli})))
+
+(subdir
+ backend
+ (rule
+  (action
+   (with-stdout-to SelectDiv.v
+    (run ndfun %{dep:SelectDiv.vp})))))
+
+(subdir
+ backend
+ (rule
+  (action
+   (with-stdout-to SplitLong.v
+    (run ndfun %{dep:SplitLong.vp})))))
+
+(subdir
+ cfrontend
+ (copy_files
+  (only_sources)
+  (files %{project_root}/cfrontend/*.{v,vp,ml,mli,mll,mly})))
+
+(subdir
+ common
+ (copy_files
+  (only_sources)
+  (files %{project_root}/common/*.{v,ml,mli})))
+
+(subdir
+ cparser
+ (copy_files
+  (only_sources)
+  (files %{project_root}/cparser/*.{v,vy,ml,mli,mll,mly,messages})))
+
+(subdir
+ cparser
+ (rule
+  (action
+   (with-stdout-to Parser.v
+    (run menhir --coq --coq-no-version-check %{dep:Parser.vy})))))
+
+(subdir
+ debug
+ (copy_files
+  (only_sources)
+  (files %{project_root}/debug/*.{ml,mli})))
+
+(subdir
+ driver
+ (copy_files
+  (only_sources)
+  (files %{project_root}/driver/*.{v,ml,mli,html})))
+
+(subdir
+ export
+ (copy_files
+  (only_sources)
+  (files %{project_root}/export/*.{v,ml,mli,md})))
+
+(subdir
+ lib
+ (copy_files
+  (only_sources)
+  (files %{project_root}/lib/*.{v,ml,mli,mll})))
 
 ; Run preprocessing directives on .vp files
+
 (include preprocess.dune)
 
 ;Compile theory from all Coq files, excluding extraction code that is run directly during compilation.
+
 (coq.theory
  (name compcert)
  (theories Flocq MenhirLib)
  ; temp flag
  (flags
-  -w -unused-pattern-matching-variable
-  -w -deprecated-since-8.19
-  -w -deprecated-since-8.20)
- (modules :standard \ common.Subtyping TargetPlatformCopy.extractionMachdep TargetPlatformCopy.extractionMachdepClight))
+  -w
+  -unused-pattern-matching-variable
+  -w
+  -deprecated-since-8.19
+  -w
+  -deprecated-since-8.20)
+ (modules
+  :standard
+  \
+  common.Subtyping
+  TargetPlatformCopy.extractionMachdep
+  TargetPlatformCopy.extractionMachdepClight))
 
 ; Our Coq files are in subdirectories of platform/ so we need this for dune to compile them too.
+
 (include_subdirs qualified)
