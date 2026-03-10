@@ -49,6 +49,7 @@
 /aarch64/SelectOp.v
 /aarch64/SelectLong.v
 /backend/SelectDiv.v
+/backend/SplitLong.v
 /cparser/Parser.v
 /cparser/Lexer.ml
 /cparser/pre_parser.ml
@@ -82,6 +83,9 @@
 .nra.cache
 .csdp.cache
 rust_projects/*
+/c2rust_testbed/*/*.s
+/c2rust_testbed/*/rust_project/
+/c2rust_testbed/*/tests/
 
 # Dune Build Results
 _build/

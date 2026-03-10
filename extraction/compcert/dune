@@ -1,5 +1,19 @@
 (include ../shared.dune)
 
+(ocamllex Lexer Readconfig Responsefile Tokenize)
+
+(rule
+ (deps pre_parser.mly pre_parser_messages.ml)
+ (targets pre_parser.ml pre_parser.mli)
+ (action
+  (run menhir --table -v --no-stdlib -la 1 --explain pre_parser.mly --base pre_parser)))
+
+(rule
+ (targets pre_parser_messages.ml)
+ (action
+  (with-stdout-to %{targets}
+   (run menhir --table pre_parser.mly -v --no-stdlib -la 1 -v -la 2 --compile-errors %{dep:handcrafted.messages}))))
+
 ; copy OCaml files from source files - only those not shared with clightgen already
 ; when trying to move extraction file into platform directory
 (copy_files %{project_root}/platform/backend/*.{ml,mli})

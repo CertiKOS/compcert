@@ -15,7 +15,7 @@
   (only_sources)
   (enabled_if
    (= %{env:TARGET_PLATFORM=ppc} ppc))
-  (files %{project_root}/powerpc/*)))
+  (files %{project_root}/powerpc/*.{v,vp,ml,mli})))
 
 (subdir
  TargetPlatformCopy
@@ -60,7 +60,7 @@
   (only_sources)
   (enabled_if
    (= %{env:TARGET_PLATFORM=ppc} riscV))
-  (files %{project_root}/riscV/*)))
+  (files %{project_root}/riscV/*.{v,vp,ml,mli})))
 
 (subdir
  TargetPlatformCopy
@@ -69,7 +69,7 @@
   (only_sources)
   (enabled_if
    (= %{env:TARGET_PLATFORM=ppc} arm))
-  (files %{project_root}/arm/*)))
+  (files %{project_root}/arm/*.{v,vp,ml,mli})))
 
 (subdir
  TargetPlatformCopy
@@ -78,41 +78,78 @@
   (only_sources)
   (enabled_if
    (= %{env:TARGET_PLATFORM=ppc} aarch64))
-  (files %{project_root}/aarch64/*)))
+  (files %{project_root}/aarch64/*.{v,vp,ml,mli})))
 
 ; copy files from all other relevant source directories
 
 (subdir
  backend
- (copy_files %{project_root}/backend/*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/backend/*.{v,vp,ml,mli})))
+
+(subdir
+ backend
+ (rule
+  (action
+   (with-stdout-to SelectDiv.v
+    (run ndfun %{dep:SelectDiv.vp})))))
+
+(subdir
+ backend
+ (rule
+  (action
+   (with-stdout-to SplitLong.v
+    (run ndfun %{dep:SplitLong.vp})))))
 
 (subdir
  cfrontend
- (copy_files %{project_root}/cfrontend/*.{v,vp,ml,mli,mll,mly}*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/cfrontend/*.{v,vp,ml,mli,mll,mly})))
 
 (subdir
  common
- (copy_files %{project_root}/common/*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/common/*.{v,ml,mli})))
 
 (subdir
  cparser
- (copy_files %{project_root}/cparser/*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/cparser/*.{v,vy,ml,mli,mll,mly,messages})))
+
+(subdir
+ cparser
+ (rule
+  (action
+   (with-stdout-to Parser.v
+    (run menhir --coq --coq-no-version-check %{dep:Parser.vy})))))
 
 (subdir
  debug
- (copy_files %{project_root}/debug/*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/debug/*.{ml,mli})))
 
 (subdir
  driver
- (copy_files %{project_root}/driver/*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/driver/*.{v,ml,mli,html})))
 
 (subdir
  export
- (copy_files %{project_root}/export/*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/export/*.{v,ml,mli,md})))
 
 (subdir
  lib
- (copy_files %{project_root}/lib/*))
+ (copy_files
+  (only_sources)
+  (files %{project_root}/lib/*.{v,ml,mli,mll})))
 
 ; Run preprocessing directives on .vp files
 
