@@ -30,6 +30,18 @@ Inductive Tree (T : Type) : Type :=
   (* element -> children -> Tree *)
   | tree_node (ele: T) (children: list (Tree T)).
 
+Arguments tree_node {T}.
+
+Definition tree_root {T : Type} (tree: Tree T) : T :=
+  match tree with
+  | tree_node ele _ => ele
+  end.
+
+Definition tree_children {T : Type} (tree: Tree T) : list (Tree T) :=
+  match tree with
+  | tree_node _ children => children
+  end.
+
 Require Import Coq.FSets.FMapList.
 Locate OrderedTypeEx.
 Require Import Coq.Structures.OrderedTypeEx.  (* For positive_as_OT *)
@@ -50,7 +62,7 @@ Record ClightCFGWithMetadata: Type
 
 (* TODO will need to make this a fixpoint eventually *)
 Definition build_dominator_tree (cfg: ClightCFG) : Tree bb_uid :=
-  tree_node bb_uid cfg.(entry) nil.
+  tree_node cfg.(entry) nil.
 
 Print BBSet.add.
 Print list.
@@ -164,7 +176,7 @@ Definition reverse_postorder_traversal_gen
 
   do (seen_set, pot) <- postorder_traversal_gen_aux fuel cfg seen_nodes pot cur_node;
 
-  let rpot := rev pot in
+  let rpot := pot in
 
   ret (rpot, gen_bb_map rpot (BBMap.empty positive) 1).
 
@@ -302,13 +314,256 @@ Record StructuredMetadata : Type :=
     sm_predecessors: BBMap.t BBSet.t;
     sm_merge_nodes: BBSet.t;
     sm_loop_headers: BBSet.t;
+    sm_idom_map: BBMap.t bb_uid;
+    sm_dom_tree: Tree bb_uid;
   }.
+
+Definition initial_idom_map (cfg: ClightCFG) : BBMap.t bb_uid :=
+  BBMap.add cfg.(entry) cfg.(entry) (BBMap.empty bb_uid).
+
+Definition idom_defined (idom_map: BBMap.t bb_uid) (node: bb_uid) : bool :=
+  match BBMap.find node idom_map with
+  | Some _ => true
+  | None => false
+  end.
+
+Fixpoint intersect_idoms
+  (fuel: nat)
+  (rpo_map: BBMap.t positive)
+  (idom_map: BBMap.t bb_uid)
+  (finger1 finger2: bb_uid)
+  : option bb_uid
+  :=
+  match fuel with
+  | O => None
+  | S fuel' =>
+      if Pos.eqb finger1 finger2 then
+        Some finger1
+      else
+        match get_rpo_num rpo_map finger1, get_rpo_num rpo_map finger2 with
+        | Some n1, Some n2 =>
+            if Pos.ltb n1 n2 then
+              match BBMap.find finger2 idom_map with
+              | Some next2 => intersect_idoms fuel' rpo_map idom_map finger1 next2
+              | None => None
+              end
+            else if Pos.ltb n2 n1 then
+              match BBMap.find finger1 idom_map with
+              | Some next1 => intersect_idoms fuel' rpo_map idom_map next1 finger2
+              | None => None
+              end
+            else None
+        | _, _ => None
+        end
+  end.
+
+Fixpoint fold_idom_preds
+  (fuel: nat)
+  (rpo_map: BBMap.t positive)
+  (idom_map: BBMap.t bb_uid)
+  (preds: list bb_uid)
+  (acc: option bb_uid)
+  : option bb_uid
+  :=
+  match preds with
+  | [] => acc
+  | pred :: rest =>
+      if idom_defined idom_map pred then
+        match acc with
+        | None => fold_idom_preds fuel rpo_map idom_map rest (Some pred)
+        | Some cur =>
+            match intersect_idoms fuel rpo_map idom_map pred cur with
+            | Some merged => fold_idom_preds fuel rpo_map idom_map rest (Some merged)
+            | None => fold_idom_preds fuel rpo_map idom_map rest acc
+            end
+        end
+      else
+        fold_idom_preds fuel rpo_map idom_map rest acc
+  end.
+
+Definition update_idom_for_node
+  (fuel: nat)
+  (entry: bb_uid)
+  (pred_map: BBMap.t BBSet.t)
+  (rpo_map: BBMap.t positive)
+  (idom_map: BBMap.t bb_uid)
+  (node: bb_uid)
+  : (BBMap.t bb_uid * bool)
+  :=
+  if Pos.eqb node entry then
+    (idom_map, false)
+  else
+    let preds :=
+      match BBMap.find node pred_map with
+      | Some ps => BBSet.elements ps
+      | None => []
+      end
+    in
+    match fold_idom_preds fuel rpo_map idom_map preds None with
+    | None => (idom_map, false)
+    | Some new_idom =>
+        match BBMap.find node idom_map with
+        | Some old_idom =>
+            if Pos.eqb old_idom new_idom then
+              (idom_map, false)
+            else
+              (BBMap.add node new_idom idom_map, true)
+        | None =>
+            (BBMap.add node new_idom idom_map, true)
+        end
+    end.
+
+Fixpoint update_idom_over_nodes
+  (fuel: nat)
+  (entry: bb_uid)
+  (pred_map: BBMap.t BBSet.t)
+  (rpo_map: BBMap.t positive)
+  (nodes: list bb_uid)
+  (idom_map: BBMap.t bb_uid)
+  : (BBMap.t bb_uid * bool)
+  :=
+  match nodes with
+  | [] => (idom_map, false)
+  | node :: rest =>
+      let '(updated_map, changed_here) :=
+        update_idom_for_node fuel entry pred_map rpo_map idom_map node in
+      let '(final_map, changed_rest) :=
+        update_idom_over_nodes fuel entry pred_map rpo_map rest updated_map in
+      (final_map, orb changed_here changed_rest)
+  end.
+
+Fixpoint compute_idom_map_fuel
+  (fuel: nat)
+  (entry: bb_uid)
+  (pred_map: BBMap.t BBSet.t)
+  (rpo_map: BBMap.t positive)
+  (nodes: list bb_uid)
+  (idom_map: BBMap.t bb_uid)
+  : BBMap.t bb_uid
+  :=
+  match fuel with
+  | O => idom_map
+  | S fuel' =>
+      let '(next_map, changed) :=
+        update_idom_over_nodes fuel entry pred_map rpo_map nodes idom_map in
+      if changed then
+        compute_idom_map_fuel fuel' entry pred_map rpo_map nodes next_map
+      else
+        next_map
+  end.
+
+Definition compute_idom_map
+  (cfg: ClightCFG)
+  (rpo_list: list bb_uid)
+  (rpo_map: BBMap.t positive)
+  (pred_map: BBMap.t BBSet.t)
+  : BBMap.t bb_uid
+  :=
+  let fuel := S (Nat.mul (length rpo_list) (length rpo_list)) in
+  compute_idom_map_fuel fuel cfg.(entry) pred_map rpo_map rpo_list (initial_idom_map cfg).
+
+Fixpoint children_of
+  (parent: bb_uid)
+  (ordered_nodes: list bb_uid)
+  (idom_map: BBMap.t bb_uid)
+  : list bb_uid
+  :=
+  match ordered_nodes with
+  | [] => []
+  | node :: rest =>
+      let rest_children := children_of parent rest idom_map in
+      if Pos.eqb node parent then
+        rest_children
+      else
+        match BBMap.find node idom_map with
+        | Some idom =>
+            if Pos.eqb idom parent then node :: rest_children else rest_children
+        | None => rest_children
+        end
+  end.
+
+Fixpoint build_dom_tree_aux
+  (fuel: nat)
+  (ordered_nodes: list bb_uid)
+  (idom_map: BBMap.t bb_uid)
+  (root: bb_uid)
+  : mon (Tree bb_uid)
+  :=
+  match fuel with
+  | O => error (Errors.msg "Out of fuel while building dominator tree")
+  | S fuel' =>
+      let child_labels := children_of root ordered_nodes idom_map in
+      do child_trees <- build_dom_forest_aux fuel' ordered_nodes idom_map child_labels;
+      ret (tree_node root child_trees)
+  end
+with build_dom_forest_aux
+  (fuel: nat)
+  (ordered_nodes: list bb_uid)
+  (idom_map: BBMap.t bb_uid)
+  (roots: list bb_uid)
+  : mon (list (Tree bb_uid))
+  :=
+  match fuel with
+  | O => error (Errors.msg "Out of fuel while building dominator forest")
+  | S fuel' =>
+      match roots with
+      | [] => ret []
+      | root :: rest =>
+          do tree <- build_dom_tree_aux fuel' ordered_nodes idom_map root;
+          do forest <- build_dom_forest_aux fuel' ordered_nodes idom_map rest;
+          ret (tree :: forest)
+      end
+  end.
+
+Fixpoint find_subtree_fuel
+  (fuel: nat)
+  (target: bb_uid)
+  (tree: Tree bb_uid)
+  : option (Tree bb_uid)
+  :=
+  match fuel with
+  | O => None
+  | S fuel' =>
+      if Pos.eqb target (tree_root tree) then
+        Some tree
+      else
+        find_subtree_in_forest_fuel fuel' target (tree_children tree)
+  end
+with find_subtree_in_forest_fuel
+  (fuel: nat)
+  (target: bb_uid)
+  (forest: list (Tree bb_uid))
+  : option (Tree bb_uid)
+  :=
+  match fuel with
+  | O => None
+  | S fuel' =>
+      match forest with
+      | [] => None
+      | tree :: rest =>
+          match find_subtree_fuel fuel' target tree with
+          | Some subtree => Some subtree
+          | None => find_subtree_in_forest_fuel fuel' target rest
+          end
+      end
+  end.
+
+Definition find_subtree
+  (fuel: nat)
+  (target: bb_uid)
+  (tree: Tree bb_uid)
+  : option (Tree bb_uid)
+  :=
+  find_subtree_fuel fuel target tree.
 
 Definition build_structured_metadata (cfg: ClightCFG) : mon StructuredMetadata :=
   gdo (rpo_list, rpo_map) <- reverse_postorder_traversal_gen cfg;
   let predecessors := compute_predecessor_map cfg in
   let merge_nodes := compute_merge_nodes cfg predecessors rpo_map in
   let loop_headers := compute_loop_headers cfg rpo_map in
+  let idom_map := compute_idom_map cfg rpo_list rpo_map predecessors in
+  let dom_fuel := S (Nat.mul (length rpo_list) (length rpo_list)) in
+  gdo dom_tree <- build_dom_tree_aux dom_fuel rpo_list idom_map cfg.(entry);
   ret
     {|
       sm_rpo_list := rpo_list;
@@ -316,6 +571,8 @@ Definition build_structured_metadata (cfg: ClightCFG) : mon StructuredMetadata :
       sm_predecessors := predecessors;
       sm_merge_nodes := merge_nodes;
       sm_loop_headers := loop_headers;
+      sm_idom_map := idom_map;
+      sm_dom_tree := dom_tree;
     |}.
 
 
@@ -459,6 +716,12 @@ Fixpoint transl_clightcfg_instructions (insts: list Instruction) :
   | nil => ret S_skip
   end.
 
+Definition get_bb (cfg: ClightCFG) (block_uid: bb_uid): mon BasicBlock :=
+  match BBMap.find block_uid (cfg.(ClightCFG.map)) with
+  | Some block => ret block
+  | None => error(Errors.msg "BB missing from ndoe when viewing edge")
+  end.
+
 Inductive ContainingSyntax :=
   | IfThenElse: ContainingSyntax
   | LoopHeadedBy: bb_uid -> ContainingSyntax
@@ -565,6 +828,202 @@ Definition choose_structured_branch
       end
   end.
 
+Fixpoint filter_merge_children
+  (meta: StructuredMetadata)
+  (children: list (Tree bb_uid))
+  : list (Tree bb_uid)
+  :=
+  match children with
+  | [] => []
+  | child :: rest =>
+      let filtered_rest := filter_merge_children meta rest in
+      if BBSet.mem (tree_root child) meta.(sm_merge_nodes)
+      then child :: filtered_rest
+      else filtered_rest
+  end.
+
+Definition merge_children_in_nesting_order
+  (meta: StructuredMetadata)
+  (children: list (Tree bb_uid))
+  : list (Tree bb_uid)
+  :=
+  rev (filter_merge_children meta children).
+
+Definition lookup_subtree
+  (fuel: nat)
+  (meta: StructuredMetadata)
+  (target: bb_uid)
+  : mon (Tree bb_uid)
+  :=
+  match find_subtree fuel target meta.(sm_dom_tree) with
+  | Some subtree => ret subtree
+  | None => error (Errors.msg "Missing dominator subtree for branch target")
+  end.
+
+Fixpoint doTree_nodisp
+  (fuel: nat)
+  (meta: StructuredMetadata)
+  (cfg: ClightCFG)
+  (r_ty: type)
+  (subtree: Tree bb_uid)
+  (context: TranslContext)
+  : SimplExpr.mon rstatement
+  :=
+  match fuel with
+  | O => SimplExpr.error (Errors.msg "Out of fuel in structured tree translation")
+  | S fuel' =>
+      let x := tree_root subtree in
+      let children := tree_children subtree in
+      let merge_children := merge_children_in_nesting_order meta children in
+      if BBSet.mem x meta.(sm_loop_headers)
+      then
+        let loop_context :=
+          with_fallthrough x (inside_context (LoopHeadedBy x) context)
+        in
+        gdo code_for_x <- nodeWithin_nodisp fuel' meta cfg r_ty x merge_children loop_context;
+        ret (mk_loop_for_header x code_for_x)
+      else
+        nodeWithin_nodisp fuel' meta cfg r_ty x merge_children context
+  end
+with nodeWithin_nodisp
+  (fuel: nat)
+  (meta: StructuredMetadata)
+  (cfg: ClightCFG)
+  (r_ty: type)
+  (x: bb_uid)
+  (merge_children: list (Tree bb_uid))
+  (context: TranslContext)
+  : SimplExpr.mon rstatement
+  :=
+  match fuel with
+  | O => SimplExpr.error (Errors.msg "Out of fuel in structured node placement")
+  | S fuel' =>
+      match merge_children with
+      | [] =>
+          transl_cfg_node_nodisp fuel' meta cfg r_ty x context
+      | y_n :: ys =>
+          let ylabel := tree_root y_n in
+          let inner_context :=
+            with_fallthrough ylabel (inside_context (BlockFollowedBy ylabel) context)
+          in
+          gdo inner <- nodeWithin_nodisp fuel' meta cfg r_ty x ys inner_context;
+          gdo y_stmt <- doTree_nodisp fuel' meta cfg r_ty y_n context;
+          ret (S_sequence (mk_block_followed_by ylabel inner) y_stmt)
+      end
+  end
+with doBranch_nodisp
+  (fuel: nat)
+  (meta: StructuredMetadata)
+  (cfg: ClightCFG)
+  (r_ty: type)
+  (source target: bb_uid)
+  (context: TranslContext)
+  : SimplExpr.mon rstatement
+  :=
+  match fuel with
+  | O => SimplExpr.error (Errors.msg "Out of fuel in structured branch translation")
+  | S fuel' =>
+      if is_fallthrough_target target context then
+        ret S_skip
+      else if andb (is_backward_edge meta.(sm_rpo_map) source target)
+                    (BBSet.mem target meta.(sm_loop_headers))
+      then
+        if label_in_context target context then
+          ret (S_continue (Some (encode_block_label target)))
+        else
+          SimplExpr.error (Errors.msg "Backward edge target missing from context")
+      else if BBSet.mem target meta.(sm_merge_nodes) then
+        if label_in_context target context then
+          ret (S_break (Some (encode_block_label target)))
+        else
+          SimplExpr.error (Errors.msg "Merge target missing from context")
+      else
+        gdo target_tree <- lookup_subtree fuel' meta target;
+        doTree_nodisp fuel' meta cfg r_ty target_tree context
+  end
+with transl_cfg_to_rustlight_sl_nodisp
+  (fuel: nat)
+  (meta: StructuredMetadata)
+  (cfg: ClightCFG)
+  (r_ty: type)
+  (source: bb_uid)
+  (context: TranslContext)
+  (maybe_dflt: option rstatement)
+  (sl: switch_list)
+  : SimplExpr.mon labeled_rstatements
+  :=
+  match fuel with
+  | O => SimplExpr.error (Errors.msg "Out of fuel in structured switch translation")
+  | S fuel' =>
+      match sl with
+      | SLnil s' =>
+          gdo final_stmt <-
+            match maybe_dflt with
+            | Some dflt_stmt => ret dflt_stmt
+            | None => doBranch_nodisp fuel' meta cfg r_ty source s' context
+            end;
+          ret (LSnil final_stmt)
+      | SLcons maybe_int b sl' =>
+          match maybe_int with
+          | None =>
+              gdo final_stmt <- doBranch_nodisp fuel' meta cfg r_ty source b context;
+              transl_cfg_to_rustlight_sl_nodisp fuel' meta cfg r_ty source context (Some final_stmt) sl'
+          | Some i =>
+              gdo branch_stmt <- doBranch_nodisp fuel' meta cfg r_ty source b context;
+              gdo rest <- transl_cfg_to_rustlight_sl_nodisp fuel' meta cfg r_ty source context maybe_dflt sl';
+              ret (LScons (Some i) branch_stmt rest)
+          end
+      end
+  end
+with transl_cfg_node_nodisp
+  (fuel: nat)
+  (meta: StructuredMetadata)
+  (cfg: ClightCFG)
+  (r_ty: type)
+  (cur_node: bb_uid)
+  (context: TranslContext)
+  : SimplExpr.mon rstatement
+  :=
+  match fuel with
+  | O => SimplExpr.error (Errors.msg "Out of fuel in structured node translation")
+  | S fuel' =>
+      gdo block <- get_bb cfg cur_node;
+      match block with
+      | bb insts edge =>
+          gdo transl_insts <- transl_clightcfg_instructions insts;
+          gdo transl_edge <-
+            match edge with
+            | direct target =>
+                doBranch_nodisp fuel' meta cfg r_ty cur_node target context
+            | conditional cexp b_true b_false =>
+                gdo r_cexp <- transl_syntax_expr cexp;
+                let branch_context := inside_context IfThenElse context in
+                gdo true_branch <- doBranch_nodisp fuel' meta cfg r_ty cur_node b_true branch_context;
+                gdo false_branch <- doBranch_nodisp fuel' meta cfg r_ty cur_node b_false branch_context;
+                ret (S_if_then_else r_cexp true_branch false_branch)
+            | terminate maybe_exp =>
+                match maybe_exp with
+                | Some exp =>
+                    gdo e <- transl_syntax_expr exp;
+                    ret (S_return (Some (e, r_typeof e)))
+                | None =>
+                    ret
+                      (match r_ty with
+                       | Tvoid => S_return None
+                       | _ => S_skip
+                       end)
+                end
+            | switch cexp sl =>
+                gdo tr_exp <- transl_syntax_expr cexp;
+                gdo lrs <- transl_cfg_to_rustlight_sl_nodisp fuel' meta cfg r_ty cur_node context None sl;
+                ret (S_match_int tr_exp lrs)
+            | stub =>
+                SimplExpr.error (Errors.msg "stub edge encountered")
+            end;
+          ret (S_sequence transl_insts transl_edge)
+      end
+  end.
+
 (* -------------------- END haskell attempt. Will return to this later -----*)
 
 Local Open Scope gensym_monad_scope_2.
@@ -574,12 +1033,6 @@ Definition bbuid_ty : type := Ctypes.Tint I32 Unsigned noattr.
 
 Definition bb_to_rexpr (block_id: bb_uid): rexpr :=
   Econst_int (Int.repr (Z.pos block_id)) bbuid_ty.
-
-Definition get_bb (cfg: ClightCFG) (block_uid: bb_uid): mon BasicBlock :=
-  match BBMap.find block_uid (cfg.(ClightCFG.map)) with
-  | Some block => ret block
-  | None => error(Errors.msg "BB missing from ndoe when viewing edge")
-  end.
 
 Definition gen_goto_next_bb
   (cf_lbl_ident: bb_uid) (goto_id: bb_uid) : rstatement :=
@@ -849,17 +1302,8 @@ Definition transl_cfg_to_rustlight_dispatcher (cfg: ClightCFG) (r_ty: type) : Si
 
 Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon rstatement :=
   gdo meta <- build_structured_metadata cfg;
-  gdo cf_lbl_ident <- SimplExpr.gensym bbuid_ty;
-  match meta.(sm_rpo_list) with
-  | [] =>
-      transl_cfg_to_rustlight_dispatcher cfg r_ty
-  | _ =>
-      gdo tree_body <- doTree cfg cf_lbl_ident r_ty meta.(sm_rpo_list);
-      let s_stmt := S_set cf_lbl_ident (bb_to_rexpr cfg.(entry)) in
-      let loop_body := S_sequence tree_body (S_continue (Some (encode_control_label cf_lbl_ident))) in
-      let l_stmt := S_loop (Some (encode_control_label cf_lbl_ident)) loop_body S_skip in
-      ret (S_sequence s_stmt l_stmt)
-  end.
+  let fuel := S (Nat.mul (length meta.(sm_rpo_list)) (length meta.(sm_rpo_list))) in
+  doTree_nodisp fuel meta cfg r_ty meta.(sm_dom_tree) empty_context.
 
 Print calling_convention.
 Print r_calling_convention.

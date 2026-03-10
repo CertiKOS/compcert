@@ -4,6 +4,7 @@ open BinPos
 open ClightCFG
 open Ctypes
 open Errors
+open SimplExpr
 
 let pos_eq a b =
   match Pos.compare a b with
@@ -159,8 +160,60 @@ let pred_count pred_map uid =
   | Some s -> List.length (BBSet.elements s)
   | None -> 0
 
+let dominates_with_idom idom_map dom node =
+  let rec walk fuel cur =
+    if pos_eq cur dom then
+      true
+    else if fuel <= 0 then
+      false
+    else
+      match BBMap.find cur idom_map with
+      | Some parent when not (pos_eq parent cur) -> walk (fuel - 1) parent
+      | _ -> false
+  in
+  walk 256 node
+
+let choose_irreducible_header cfg pred_map =
+  match RustLightgen.build_structured_metadata cfg (initial_generator ()) with
+  | Err _ -> None
+  | Res (meta, _) ->
+      let headers = BBSet.elements meta.RustLightgen.sm_loop_headers in
+      let choose_better best candidate =
+        let score n =
+          let q = max 1 (instruction_count cfg n) in
+          let p = max 1 (pred_count pred_map n) in
+          q * max 1 (p - 1)
+        in
+        match best with
+        | None -> Some candidate
+        | Some b ->
+            if score candidate < score b then Some candidate else best
+      in
+      List.fold_left
+        (fun best header ->
+          let preds =
+            match BBMap.find header pred_map with
+            | Some s -> BBSet.elements s
+            | None -> []
+          in
+          let has_bad_backpred =
+            List.exists
+              (fun pred ->
+                RustLightgen.is_backward_edge meta.RustLightgen.sm_rpo_map pred header
+                && not (dominates_with_idom meta.RustLightgen.sm_idom_map header pred))
+              preds
+          in
+          if has_bad_backpred && not (pos_eq header cfg.entry) then
+            choose_better best header
+          else
+            best)
+        None headers
+
 let select_split_candidate cfg =
   let pred_map = compute_predecessors cfg in
+  match choose_irreducible_header cfg pred_map with
+  | Some uid -> Some uid
+  | None ->
   let sccs = find_sccs cfg in
   let choose_better cfg pred_map best candidate =
     let score n =
