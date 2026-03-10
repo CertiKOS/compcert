@@ -1,7 +1,7 @@
 use libc::{c_int, c_uint};
 use rust_project::arrays::entry_arrays;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static SOME_INTS: [u32; 4] = [2, 0, 1, 8];
 
 const BUFFER_SIZE: usize = 49;

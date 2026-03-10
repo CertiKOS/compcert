@@ -860,6 +860,10 @@ Definition lookup_subtree
   | None => error (Errors.msg "Missing dominator subtree for branch target")
   end.
 
+Definition structured_translation_fuel (meta: StructuredMetadata) : nat :=
+  let n := S (length meta.(sm_rpo_list)) in
+  S (Nat.mul (Nat.mul n n) n).
+
 Fixpoint doTree_nodisp
   (fuel: nat)
   (meta: StructuredMetadata)
@@ -1302,7 +1306,7 @@ Definition transl_cfg_to_rustlight_dispatcher (cfg: ClightCFG) (r_ty: type) : Si
 
 Definition transl_cfg_to_rustlight (cfg: ClightCFG) (r_ty: type) : SimplExpr.mon rstatement :=
   gdo meta <- build_structured_metadata cfg;
-  let fuel := S (Nat.mul (length meta.(sm_rpo_list)) (length meta.(sm_rpo_list))) in
+  let fuel := structured_translation_fuel meta in
   doTree_nodisp fuel meta cfg r_ty meta.(sm_dom_tree) empty_context.
 
 Print calling_convention.

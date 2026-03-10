@@ -4,7 +4,7 @@ num_cores := env_var_or_default('NUM_CORES', '8')
 # configure
 build_compcert_full:
   ./configure {{arch}}
-  just build_quick
+  just build_compcert_quick
 
 # no configure
 build_compcert_quick:
@@ -17,5 +17,4 @@ compile_custom_tests:
   pushd rust_tests && just clean && just compile_all && popd
 
 test:
-  pushd c2rust_testbed/working_tests && just clean && just compile_all && popd
-
+  pushd c2rust_testbed/working_tests && just test && popd
