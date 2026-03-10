@@ -49,7 +49,6 @@
 /aarch64/SelectOp.v
 /aarch64/SelectLong.v
 /backend/SelectDiv.v
-/backend/SplitLong.v
 /cparser/Parser.v
 /cparser/Lexer.ml
 /cparser/pre_parser.ml
